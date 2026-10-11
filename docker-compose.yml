@@ -1,0 +1,363 @@
+name: lakehouse
+
+# Profile: dịch vụ không gắn profile = core (luôn chạy); "bi" = Superset.
+#   make up-core  → docker compose up -d
+#   make up       → docker compose --profile bi up -d
+
+x-airflow-common:
+  &airflow-common
+  image: lakehouse-airflow:3.3.1-spark4.0.4
+  environment:
+    &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres-meta/${AIRFLOW_DB_NAME}
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__SECRETS__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    # Kết nối hệ thống nguồn cho SqlSensor (dag_monthly)
+    AIRFLOW_CONN_CORE_CARD: postgresql://${SOURCE_DB_USER}:${SOURCE_DB_PASSWORD}@postgres-source:5432/${SOURCE_DB_NAME}
+    # Spark local: cấu hình catalog trong infra/spark, thông tin S3 qua biến AWS_*
+    SPARK_CONF_DIR: /opt/spark-conf
+    AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+    AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+    AWS_REGION: us-east-1
+    SOURCE_JDBC_URL: jdbc:postgresql://postgres-source:5432/${SOURCE_DB_NAME}
+    SOURCE_DB_USER: ${SOURCE_DB_USER}
+    SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
+    HMAC_SECRET: ${HMAC_SECRET}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./spark:/opt/airflow/spark:ro
+    - ./infra/spark:/opt/spark-conf:ro
+  depends_on:
+    &airflow-depends
+    postgres-meta:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
+  networks:
+    - lakehouse
+
+services:
+  # ---------------------------------------------------------------- Lưu trữ
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+  minio-init:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    # Bucket theo mục 4.2; tài khoản dịch vụ riêng (không dùng root) cho Lakekeeper, Spark, Trino
+    entrypoint: >
+      /bin/sh -c "
+      set -e;
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
+      mc mb --ignore-existing local/landing;
+      mc mb --ignore-existing local/warehouse;
+      mc admin user add local $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY;
+      mc admin policy attach local readwrite --user $$MINIO_ACCESS_KEY || true;
+      echo 'MinIO ready: landing, warehouse, user' $$MINIO_ACCESS_KEY
+      "
+    restart: "no"
+    networks:
+      - lakehouse
+
+  # ---------------------------------------------------------------- PostgreSQL
+  postgres-meta:
+    image: postgres:16-alpine
+    container_name: postgres-meta
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      POSTGRES_USER: ${META_DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${META_DB_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      LAKEKEEPER_DB_USER: ${LAKEKEEPER_DB_USER}
+      LAKEKEEPER_DB_PASSWORD: ${LAKEKEEPER_DB_PASSWORD}
+      LAKEKEEPER_DB_NAME: ${LAKEKEEPER_DB_NAME}
+      AIRFLOW_DB_USER: ${AIRFLOW_DB_USER}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      AIRFLOW_DB_NAME: ${AIRFLOW_DB_NAME}
+      SUPERSET_DB_USER: ${SUPERSET_DB_USER}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      SUPERSET_DB_NAME: ${SUPERSET_DB_NAME}
+    volumes:
+      - meta-db-volume:/var/lib/postgresql/data
+      - ./infra/postgres-meta/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${META_DB_ADMIN_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+  # Hệ thống nguồn giả lập core_card (mục 3.3), tách khỏi metadata nền tảng
+  postgres-source:
+    image: postgres:16-alpine
+    container_name: postgres-source
+    environment:
+      POSTGRES_USER: ${SOURCE_DB_USER}
+      POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD}
+      POSTGRES_DB: ${SOURCE_DB_NAME}
+    ports:
+      - "${SOURCE_DB_HOST_PORT:-5434}:5432"
+    volumes:
+      - source-db-volume:/var/lib/postgresql/data
+      - ./infra/postgres-source/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SOURCE_DB_USER} -d ${SOURCE_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+  # ---------------------------------------------------------------- Catalog
+  lakekeeper-migrate:
+    image: &lakekeeper-image quay.io/lakekeeper/catalog:v0.13.6
+    container_name: lakekeeper-migrate
+    command: ["migrate"]
+    environment: &lakekeeper-env
+      LAKEKEEPER__PG_ENCRYPTION_KEY: ${LAKEKEEPER_ENCRYPTION_KEY}
+      LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://${LAKEKEEPER_DB_USER}:${LAKEKEEPER_DB_PASSWORD}@postgres-meta:5432/${LAKEKEEPER_DB_NAME}
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://${LAKEKEEPER_DB_USER}:${LAKEKEEPER_DB_PASSWORD}@postgres-meta:5432/${LAKEKEEPER_DB_NAME}
+      RUST_LOG: info
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - lakehouse
+
+  lakekeeper:
+    image: *lakekeeper-image
+    container_name: lakekeeper
+    command: ["serve"]
+    environment: *lakekeeper-env
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      lakekeeper-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+  lakekeeper-bootstrap:
+    image: curlimages/curl:8.7.1
+    container_name: lakekeeper-bootstrap
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    environment:
+      WAREHOUSE_NAME: lakehouse
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - ./infra/lakekeeper/bootstrap.sh:/bootstrap.sh:ro
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - lakehouse
+
+  # ---------------------------------------------------------------- Truy vấn
+  trino:
+    image: trinodb/trino:480
+    container_name: trino
+    ports:
+      - "8082:8080"
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
+    healthcheck:
+      test: ["CMD-SHELL", "trino --execute 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      lakekeeper-bootstrap:
+        condition: service_completed_successfully
+    mem_limit: 2g
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+  # ---------------------------------------------------------------- Điều phối + Spark
+  airflow-init:
+    <<: *airflow-common
+    build:
+      context: ./infra/airflow
+    container_name: airflow-init
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create --username $${_AIRFLOW_WWW_USER_USERNAME} --password $${_AIRFLOW_WWW_USER_PASSWORD}
+      --firstname Admin --lastname User --role Admin --email admin@example.com"
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow-apiserver
+    command: api-server --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    mem_limit: 1g
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-depends
+      lakekeeper-bootstrap:
+        condition: service_completed_successfully
+      postgres-source:
+        condition: service_healthy
+    # LocalExecutor chạy task (kể cả spark-submit) ngay trong container này
+    mem_limit: 3g
+    restart: unless-stopped
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: airflow-dag-processor
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- BI (profile bi)
+  superset-init:
+    profiles: ["bi"]
+    build:
+      context: ./infra/superset
+    image: lakehouse-superset:6.0.0
+    container_name: superset-init
+    environment: &superset-env
+      SUPERSET_CONFIG_PATH: /app/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_DATABASE_URI: postgresql+psycopg2://${SUPERSET_DB_USER}:${SUPERSET_DB_PASSWORD}@postgres-meta:5432/${SUPERSET_DB_NAME}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+    volumes: &superset-volumes
+      - ./infra/superset/superset_config.py:/app/superset_config.py:ro
+    command: >
+      /bin/sh -c "
+      superset db upgrade &&
+      (superset fab create-admin --username admin --firstname Admin --lastname Admin
+      --email admin@example.com --password $$SUPERSET_ADMIN_PASSWORD || true) &&
+      superset init
+      "
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - lakehouse
+
+  superset:
+    profiles: ["bi"]
+    image: lakehouse-superset:6.0.0
+    container_name: superset
+    environment: *superset-env
+    volumes: *superset-volumes
+    ports:
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+      trino:
+        condition: service_healthy
+    mem_limit: 1g
+    restart: unless-stopped
+    networks:
+      - lakehouse
+
+networks:
+  lakehouse:
+    driver: bridge
+
+volumes:
+  minio_data:
+  meta-db-volume:
+  source-db-volume:
