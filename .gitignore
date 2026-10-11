@@ -1,0 +1,25 @@
+# Bí mật
+.env
+
+# Dữ liệu gốc và dữ liệu sinh ra (không commit)
+data/
+*.csv
+*.parquet
+*.duckdb
+*.duckdb.wal
+!tests/fixtures/*.csv
+
+# Airflow
+airflow/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
