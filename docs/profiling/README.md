@@ -19,10 +19,10 @@ Số liệu chi tiết: [profiling_report.md](profiling_report.md) (sinh lại b
 
 | # | Phát hiện | Tác động |
 |---|---|---|
-| 1 | Trường `errors` có nhiều lỗi được bọc `"…"`. 20 nghìn dòng đầu không có trường như vậy nên công cụ tự đoán định dạng CSV sẽ đọc sai | `seed_source.py` phải khai báo rõ `quote='"'` |
+| 1 | Trường `errors` có nhiều lỗi được bọc `"…"`. 20 nghìn dòng đầu không có trường như vậy nên công cụ tự đoán định dạng CSV sẽ đọc sai | Phải đọc bằng parser CSV chuẩn, khai báo rõ ký tự quote. Tuần 3: `seed_source.py` dùng `COPY … (FORMAT csv)` |
 | 2 | Kênh Chip chỉ xuất hiện **từ năm 2015** (0% trước 2015, khoảng 71% từ 2015) | Có sẵn câu trả lời rõ ràng cho Q2, nên đưa lên D1 |
 | 3 | **5.788** giao dịch `Chip Transaction` có `merchant_city = ONLINE` | R07 có vi phạm thật, minh họa được WARN |
-| 4 | Dữ liệu gốc gần như sạch: R01–R06, R08 và R09 đều **0 vi phạm** | **Cần chèn lỗi có kiểm soát** khi seed (VD `make seed MONTH=… INJECT_FAULTS=1`) để demo quarantine, BLOCK và nâng WARN thành BLOCK |
+| 4 | Dữ liệu gốc gần như sạch: R01–R06, R08 và R09 đều **0 vi phạm** | Cần dữ liệu có lỗi để demo quarantine, BLOCK và nâng WARN thành BLOCK. *Cập nhật tuần 3: không chèn lỗi vào nguồn; dùng pytest trên bộ dữ liệu mẫu có lỗi cố ý (`tests/fixtures/`)* |
 | 5 | Chỉ **9,7%** số thẻ thỏa Luhn (số giả) | **R13 phải đổi**: quét mọi chuỗi 15–16 chữ số hoặc so khớp HMAC với tập token, không lọc theo Luhn |
 | 6 | 309 giao dịch xảy ra trước tháng mở thẻ, 83 giao dịch sau tháng hết hạn | Ứng viên rule mới **R14 (WARN)**: giao dịch nằm ngoài thời hạn thẻ |
 | 7 | `merchant_state` gồm 52 mã bang Mỹ và **147 tên quốc gia** (89.006 giao dịch nước ngoài). `zip` chỉ null khi giao dịch online hoặc nước ngoài | Cờ `is_foreign = length(state) <> 2`; zip null là hợp lệ |
@@ -34,7 +34,7 @@ Số liệu chi tiết: [profiling_report.md](profiling_report.md) (sinh lại b
 | 13 | `birth_year + current_age = 2019` (năm chụp dữ liệu). Có 1 giao dịch của khách 17 tuổi | Q7 cần nhóm tuổi "< 18" hoặc gộp vào nhóm 18–24 |
 | 14 | amount từ −500 đến 6.820,20; 660.049 giao dịch hoàn tiền (4,96%); 10.639 giao dịch amount = 0 | Hoàn tiền không coi là lỗi (đúng như thiết kế) |
 | 15 | Thời điểm giao dịch chỉ chính xác đến phút | Đủ cho Q3 (giờ × thứ) |
-| 16 | Số giao dịch theo tháng ổn định, không tháng nào lệch quá ±3σ | R12 sẽ không cảnh báo trên dữ liệu gốc, cần chèn lỗi (mục 4) để demo |
+| 16 | Số giao dịch theo tháng ổn định, không tháng nào lệch quá ±3σ | R12 sẽ không cảnh báo trên dữ liệu gốc; kiểm chứng bằng fixture (mục 4) |
 
 ## Đề xuất cập nhật Design Doc (v5)
 
@@ -44,8 +44,8 @@ Số liệu chi tiết: [profiling_report.md](profiling_report.md) (sinh lại b
   - Thêm ghi chú về CSV có trường bọc ngoặc kép.
   - Thêm `card_type = "Debit (Prepaid)"`.
   - Thêm 31 thẻ có `credit_limit = 0`.
-- **Mục 3.3:** thêm tùy chọn chèn lỗi khi phát hành batch. "Năm cuối" là 2019 với 10 tháng.
+- **Mục 3.3:** thêm tùy chọn chèn lỗi khi phát hành batch (*tuần 3 đã bỏ: nạp toàn bộ một lần, kiểm chứng DQ bằng fixture*). "Năm cuối" là 2019 với 10 tháng.
 - **Mục 6:**
   - Sửa R13: bỏ điều kiện Luhn.
   - Thêm R14: giao dịch ngoài thời hạn thẻ.
-  - Ghi chú rằng dữ liệu gốc sạch nên phần demo DQ dựa vào chèn lỗi.
+  - Ghi chú rằng dữ liệu gốc sạch nên phần demo DQ dựa vào chèn lỗi (*tuần 3: đổi sang fixture trong pytest*).

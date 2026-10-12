@@ -8,7 +8,7 @@ Luồng dữ liệu: PostgreSQL `core_card` → Bronze → Silver → Gold (Apac
 
 - Docker Desktop (Compose v2). Máy nên có ≥ 16 GB RAM, ≥ 4 nhân CPU và ≥ 50 GB đĩa trống. Máy ít RAM thì dùng `make up-core`.
 - [uv](https://docs.astral.sh/uv/) để chạy profiling và test trên máy host.
-- Bộ dữ liệu [Financial Transactions Dataset](https://www.kaggle.com/datasets/computingvictor/transactions-fraud-datasets), giải nén vào `../Financial Transactions Dataset/`. Nếu đặt ở chỗ khác thì truyền `DATA_DIR=…`.
+- Bộ dữ liệu [Financial Transactions Dataset](https://www.kaggle.com/datasets/computingvictor/transactions-fraud-datasets), giải nén vào `data/raw/` (không commit). Nếu đặt ở chỗ khác thì truyền `DATA_DIR=…`.
 
 ## Chạy nhanh
 
@@ -18,6 +18,8 @@ make secrets    # sinh khóa, dán vào .env thay cho change_me
 make up         # khởi động toàn bộ dịch vụ (make up-core: không có Superset)
 make ps         # kiểm tra trạng thái / healthcheck
 make smoke      # kiểm chứng Spark ghi → Trino đọc/ghi → Spark đọc cùng bảng Iceberg
+make seed       # nạp toàn bộ dữ liệu nguồn vào PostgreSQL core_card (~1 phút; FORCE=1 để nạp lại)
+make seed-status
 ```
 
 Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
@@ -30,7 +32,7 @@ Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất
 | Airflow | http://localhost:8080 |
 | Superset | http://localhost:8088 |
 
-Gõ `make help` để xem toàn bộ lệnh. Các lệnh `seed`, `demo`, `erase` sẽ được hiện thực dần theo kế hoạch.
+Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ được hiện thực dần theo kế hoạch.
 
 ## Phiên bản công nghệ (chốt tuần 1)
 
@@ -44,7 +46,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `seed`, `demo`, `erase`
 | Apache Airflow | 3.3.1, LocalExecutor, image `lakehouse-airflow` có Java + PySpark | ✅ |
 | Apache Superset | 6.0.0 + `trino` 0.340.0 + `psycopg2-binary` 2.9.13 | ✅ |
 | PostgreSQL | 16 (`postgres-meta`: 3 database; `postgres-source`: core_card) | ✅ |
-| Python host | 3.13, DuckDB 1.5.6 | Profiling, test |
+| Python host | 3.13, DuckDB 1.5.6, psycopg 3.3.5, minio 7.2.20 | Profiling, seed nguồn, test |
 
 ## Cấu trúc thư mục
 
@@ -53,7 +55,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `seed`, `demo`, `erase`
 ├── Makefile
 ├── .env.example          # mẫu biến môi trường (khóa HMAC, mật khẩu)
 ├── infra/                # airflow, spark, trino, lakekeeper, postgres-meta, postgres-source, superset
-├── generators/           # seed_source.py – phát hành dữ liệu theo tháng
+├── data/raw/             # bộ dữ liệu Kaggle (không commit)
+├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
 │   ├── extract/          # extract_jdbc.py, load_files.py
 │   ├── transform/        # silver_*.py, gold_*.py, marts.py
@@ -63,7 +66,10 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `seed`, `demo`, `erase`
 ├── sql/                  # truy vấn Q1–Q10, demo Iceberg
 ├── tests/                # pytest
 └── docs/
-    └── profiling/        # báo cáo profiling tuần 1
+    ├── profiling/        # báo cáo profiling tuần 1
+    ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
+    ├── source_to_target_mapping.md
+    └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
 ```
 
 ## Tiến độ
@@ -72,7 +78,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `seed`, `demo`, `erase`
 |---|---|---|
 | 1 | Chốt đề tài, profiling, phiên bản, khung repo | ✅ Xong. Xem [docs/profiling/README.md](docs/profiling/README.md) |
 | 2 | Dựng môi trường, Spark ghi → Trino đọc | ✅ Xong. Xem [docs/week2.md](docs/week2.md) |
-| 3 | Nguồn giả lập, thiết kế | ⏳ |
+| 3 | Nguồn giả lập, thiết kế | ✅ Xong. Xem [docs/week3.md](docs/week3.md) |
+| 4 | Bronze | ⏳ |
 
 ## Bảo mật
 

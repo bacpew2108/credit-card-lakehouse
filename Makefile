@@ -1,15 +1,16 @@
 # Credit Card Lakehouse – lệnh vận hành (mục 10 Design Doc)
 SHELL := /bin/bash
 COMPOSE := docker compose
-DATA_DIR ?= ../Financial Transactions Dataset
+DATA_DIR ?= data/raw
 PY := uv run --no-project --with-requirements requirements-dev.txt python
+SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed demo erase test
+.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql demo erase test
 
 help: ## Liệt kê các lệnh
-	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
 
 env: ## Tạo .env từ .env.example nếu chưa có
 	@test -f .env && echo ".env đã tồn tại, giữ nguyên" || (cp .env.example .env && echo "Đã tạo .env – hãy thay các giá trị change_me (make secrets)")
@@ -64,8 +65,15 @@ smoke: ## Kiểm chứng Spark ghi → Trino đọc/ghi → Spark đọc trên c
 trino: ## Mở Trino CLI trên catalog lakehouse
 	$(COMPOSE) exec trino trino --catalog lakehouse
 
-seed: ## (Tuần 3) Phát hành một tháng: make seed MONTH=2019-03
-	@echo "Chưa hiện thực – generators/seed_source.py (tuần 3)"; exit 1
+seed: ## Nạp toàn bộ dữ liệu nguồn vào core_card (FORCE=1 để nạp lại)
+	$(SEED) load $(if $(FORCE),--force)
+
+seed-status: ## Số dòng các bảng core_card, khoảng thời gian giao dịch
+	$(SEED) status
+
+source-sql: ## Mở psql vào core_card (make source-sql Q="SELECT …" để chạy một câu)
+	$(COMPOSE) exec $(if $(Q),-T) postgres-source \
+	  sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" "$$@"' -- $(if $(Q),-c "$(Q)")
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
