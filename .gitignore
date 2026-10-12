@@ -8,6 +8,7 @@ data/
 *.duckdb
 *.duckdb.wal
 !tests/fixtures/*.csv
+!docs/data_catalog.csv
 
 # Airflow
 airflow/logs/

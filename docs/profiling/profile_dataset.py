@@ -4,7 +4,7 @@
 vi phạm dự kiến cho rule DQ ở mục 6, xuất báo cáo Markdown.
 
     uv run --with duckdb python docs/profiling/profile_dataset.py \
-        --data-dir "../Financial Transactions Dataset" \
+        --data-dir data/raw \
         --out docs/profiling/profiling_report.md
 """
 
@@ -512,7 +512,7 @@ def profile(data_dir: Path) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", type=Path, default=Path("../Financial Transactions Dataset"))
+    ap.add_argument("--data-dir", type=Path, default=Path("data/raw"))
     ap.add_argument("--out", type=Path, default=Path("docs/profiling/profiling_report.md"))
     args = ap.parse_args()
     report = profile(args.data_dir)
