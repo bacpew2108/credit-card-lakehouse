@@ -83,7 +83,6 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-    # Bucket theo mục 4.2; tài khoản dịch vụ riêng (không dùng root) cho Lakekeeper, Spark, Trino
     entrypoint: >
       /bin/sh -c "
       set -e;
@@ -129,7 +128,7 @@ services:
     networks:
       - lakehouse
 
-  # Hệ thống nguồn giả lập core_card (mục 3.3), tách khỏi metadata nền tảng
+  # Hệ thống nguồn giả lập core_card, tách khỏi metadata nền tảng
   postgres-source:
     image: postgres:16-alpine
     container_name: postgres-source
