@@ -20,6 +20,9 @@ make ps         # kiểm tra trạng thái / healthcheck
 make smoke      # kiểm chứng Spark ghi → Trino đọc/ghi → Spark đọc cùng bảng Iceberg
 make seed       # nạp toàn bộ dữ liệu nguồn vào PostgreSQL core_card (~1 phút; FORCE=1 để nạp lại)
 make seed-status
+make bronze-ref                              # customers, cards (token hóa), mcc_codes → Bronze
+make bronze-range FROM=2010-01 TO=2019-10    # giao dịch 118 tháng → Bronze (make bronze MONTH=… cho một tháng)
+make bronze-status
 ```
 
 Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
@@ -58,6 +61,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── data/raw/             # bộ dữ liệu Kaggle (không commit)
 ├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
+│   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, ingestion_log)
 │   ├── extract/          # extract_jdbc.py, load_files.py
 │   ├── transform/        # silver_*.py, gold_*.py, marts.py
 │   ├── quality/          # rules.py, reconcile.py, pan_scan.py
@@ -79,7 +83,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 1 | Chốt đề tài, profiling, phiên bản, khung repo | ✅ Xong. Xem [docs/profiling/README.md](docs/profiling/README.md) |
 | 2 | Dựng môi trường, Spark ghi → Trino đọc | ✅ Xong. Xem [docs/week2.md](docs/week2.md) |
 | 3 | Nguồn giả lập, thiết kế | ✅ Xong. Xem [docs/week3.md](docs/week3.md) |
-| 4 | Bronze | ⏳ |
+| 4 | Bronze | ✅ Xong. Xem [docs/week4.md](docs/week4.md) |
+| 5 | Silver | ⏳ |
 
 ## Bảo mật
 

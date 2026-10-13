@@ -4,13 +4,15 @@ COMPOSE := docker compose
 DATA_DIR ?= data/raw
 PY := uv run --no-project --with-requirements requirements-dev.txt python
 SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
+SPARK := $(COMPOSE) exec -T airflow-scheduler spark-submit /opt/airflow/spark
+TRINO := $(COMPOSE) exec -T trino trino --catalog lakehouse --output-format ALIGNED --execute
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql demo erase test
+.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status demo erase test
 
 help: ## Liệt kê các lệnh
-	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
 
 env: ## Tạo .env từ .env.example nếu chưa có
 	@test -f .env && echo ".env đã tồn tại, giữ nguyên" || (cp .env.example .env && echo "Đã tạo .env – hãy thay các giá trị change_me (make secrets)")
@@ -74,6 +76,26 @@ seed-status: ## Số dòng các bảng core_card, khoảng thời gian giao dị
 source-sql: ## Mở psql vào core_card (make source-sql Q="SELECT …" để chạy một câu)
 	$(COMPOSE) exec $(if $(Q),-T) postgres-source \
 	  sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" "$$@"' -- $(if $(Q),-c "$(Q)")
+
+bronze-ref: ## Nạp customers, cards (token hóa), mcc_codes vào Bronze (FORCE=1 để nạp lại)
+	$(SPARK)/extract/extract_jdbc.py reference $(if $(FORCE),--force)
+	$(SPARK)/extract/load_files.py mcc $(if $(FORCE),--force)
+
+bronze: ## Trích xuất giao dịch một tháng vào Bronze: make bronze MONTH=2019-03 [FORCE=1]
+	@test -n "$(MONTH)" || (echo "Thiếu MONTH, VD: make bronze MONTH=2019-03"; exit 1)
+	$(SPARK)/extract/extract_jdbc.py transactions --month $(MONTH) $(if $(FORCE),--force)
+
+bronze-range: ## Trích xuất nhiều tháng: make bronze-range FROM=2010-01 TO=2019-10 [FORCE=1]
+	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make bronze-range FROM=2010-01 TO=2019-10"; exit 1)
+	$(SPARK)/extract/extract_jdbc.py transactions --from $(FROM) --to $(TO) $(if $(FORCE),--force)
+
+bronze-status: ## Số dòng các bảng Bronze và 10 lần nạp gần nhất
+	$(TRINO) "SELECT 'transactions_raw' AS tbl, count(*) AS n_rows, count(DISTINCT _batch_id) AS n_batches FROM bronze.transactions_raw \
+	  UNION ALL SELECT 'customers_raw', count(*), count(DISTINCT _batch_id) FROM bronze.customers_raw \
+	  UNION ALL SELECT 'cards_raw', count(*), count(DISTINCT _batch_id) FROM bronze.cards_raw \
+	  UNION ALL SELECT 'mcc_codes_raw', count(*), count(DISTINCT _batch_id) FROM bronze.mcc_codes_raw; \
+	  SELECT source, batch_id, source_count, row_count, status, finished_at FROM ops.ingestion_log \
+	  ORDER BY finished_at DESC LIMIT 10"
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
