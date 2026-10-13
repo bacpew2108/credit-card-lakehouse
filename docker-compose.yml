@@ -32,6 +32,9 @@ x-airflow-common:
     SOURCE_DB_USER: ${SOURCE_DB_USER}
     SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
     HMAC_SECRET: ${HMAC_SECRET}
+    # Job Spark import module dùng chung trong spark/common; boto3 đọc bucket landing
+    PYTHONPATH: /opt/airflow/spark
+    S3_ENDPOINT: http://minio:9000
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs

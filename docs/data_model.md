@@ -37,6 +37,8 @@ Mọi cột nghiệp vụ đều là `string`, giữ nguyên giá trị nguồn 
 | `bronze.mcc_codes_raw` | mcc, description | – | Ghi đè toàn bảng |
 
 - `card_token = hex(HMAC-SHA256(HMAC_SECRET, card_number))`, 64 ký tự. `card_bin` là 6 số đầu, `card_last4` là 4 số cuối. Việc token hóa làm ngay trong job extract, trước khi ghi, nên PAN không bao giờ chạm vào bucket warehouse.
+- Mọi cột được ép `::text` ngay trong câu truy vấn nguồn, nên Bronze giữ đúng giá trị Postgres trả về: `date` dạng `2019-03-01 00:01:00`, `latitude` dạng `38.2200` (NUMERIC(9,4) ở nguồn).
+- `checksum` trong ingestion_log = `sum(xxhash64(các cột nghiệp vụ))`, không phụ thuộc thứ tự dòng; hai lần nạp cùng dữ liệu cho cùng checksum.
 - Extract giao dịch tháng M lọc theo `date >= đầu tháng M AND date < đầu tháng M+1` (dùng index `transactions_date_idx`). `_batch_id` = `M`. Số dòng đếm ở nguồn với cùng điều kiện này là vế trái của R10.
 
 ## 2. Silver – đã ép kiểu, làm sạch
@@ -186,7 +188,7 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 
 | Bảng | Cột | Ghi bởi |
 |---|---|---|
-| ops.ingestion_log | run_id, source, batch_id, row_count, checksum, status, started_at, finished_at | Job Bronze |
+| ops.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
 | ops.dq_results | run_id, batch_id, rule_id, severity, checked_count, failed_count, failed_ratio, status (PASS / WARN / BLOCK), created_at | Job Silver, R13 |
 | ops.quarantine_transactions | Các cột của bronze.transactions_raw + rule_id, reason, run_id, quarantined_at | Job Silver |
 | ops.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
