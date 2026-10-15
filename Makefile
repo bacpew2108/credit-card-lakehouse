@@ -9,10 +9,10 @@ TRINO := $(COMPOSE) exec -T trino trino --catalog lakehouse --output-format ALIG
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status demo erase test
+.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status demo erase test
 
 help: ## Liệt kê các lệnh
-	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
 
 env: ## Tạo .env từ .env.example nếu chưa có
 	@test -f .env && echo ".env đã tồn tại, giữ nguyên" || (cp .env.example .env && echo "Đã tạo .env – hãy thay các giá trị change_me (make secrets)")
@@ -97,11 +97,33 @@ bronze-status: ## Số dòng các bảng Bronze và 10 lần nạp gần nhất
 	  SELECT source, batch_id, source_count, row_count, status, finished_at FROM ops.ingestion_log \
 	  ORDER BY finished_at DESC LIMIT 10"
 
+silver-ref: ## Bronze → Silver cho customers, cards, mcc_codes
+	$(SPARK)/transform/silver_reference.py
+
+silver: ## Silver giao dịch một tháng rồi cập nhật merchants: make silver MONTH=2019-03
+	@test -n "$(MONTH)" || (echo "Thiếu MONTH, VD: make silver MONTH=2019-03"; exit 1)
+	$(SPARK)/transform/silver_transactions.py --month $(MONTH)
+
+silver-range: ## Silver nhiều tháng rồi merchants: make silver-range FROM=2010-01 TO=2019-10
+	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make silver-range FROM=2010-01 TO=2019-10"; exit 1)
+	$(SPARK)/transform/silver_transactions.py --from $(FROM) --to $(TO)
+
+silver-merchants: ## Tính lại silver.merchants từ silver.transactions
+	$(SPARK)/transform/silver_merchants.py
+
+silver-status: ## Số dòng 5 bảng Silver và số bản ghi bị cách ly theo rule
+	$(TRINO) "SELECT 'transactions' AS tbl, count(*) AS n_rows FROM silver.transactions \
+	  UNION ALL SELECT 'customers', count(*) FROM silver.customers \
+	  UNION ALL SELECT 'cards', count(*) FROM silver.cards \
+	  UNION ALL SELECT 'mcc_codes', count(*) FROM silver.mcc_codes \
+	  UNION ALL SELECT 'merchants', count(*) FROM silver.merchants; \
+	  SELECT rule_id, count(*) AS n, count(DISTINCT _batch_id) AS n_batches FROM ops.quarantine_transactions GROUP BY rule_id"
+
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
 
 erase: ## (Tuần 10) Quyền xóa dữ liệu: make erase CUSTOMER_ID=…
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
 
-test: ## Chạy pytest
-	$(PY) -m pytest -q tests
+test: ## Chạy pytest (có Spark local cho hàm biến đổi Silver; cần Java 17)
+	uv run --no-project --with-requirements requirements-dev.txt --with pyspark==4.0.4 python -m pytest -q tests

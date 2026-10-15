@@ -9,6 +9,7 @@ data/
 *.duckdb.wal
 !tests/fixtures/*.csv
 !docs/data_catalog.csv
+!spark/transform/ref/*.csv
 
 # Airflow
 airflow/logs/

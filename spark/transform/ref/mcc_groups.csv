@@ -1,0 +1,110 @@
+mcc,mcc_group,description
+1711,"Nhà cửa, xây dựng","Heating, Plumbing, Air Conditioning Contractors"
+3000,"Công nghiệp, sản xuất",Steelworks
+3001,"Công nghiệp, sản xuất",Steel Products Manufacturing
+3005,"Công nghiệp, sản xuất",Miscellaneous Metal Fabrication
+3006,"Công nghiệp, sản xuất",Miscellaneous Fabricated Metal Products
+3007,"Công nghiệp, sản xuất",Coated and Laminated Products
+3008,"Công nghiệp, sản xuất",Steel Drums and Barrels
+3009,"Công nghiệp, sản xuất",Fabricated Structural Metal Products
+3058,"Công nghiệp, sản xuất","Tools, Parts, Supplies Manufacturing"
+3066,"Công nghiệp, sản xuất",Miscellaneous Metals
+3075,"Công nghiệp, sản xuất","Bolt, Nut, Screw, Rivet Manufacturing"
+3132,Mua sắm bán lẻ,Leather Goods
+3144,"Nhà cửa, xây dựng",Floor Covering Stores
+3174,"Nhà cửa, xây dựng",Upholstery and Drapery Stores
+3256,"Công nghiệp, sản xuất","Brick, Stone, and Related Materials"
+3260,"Công nghiệp, sản xuất",Pottery and Ceramics
+3359,"Công nghiệp, sản xuất",Non-Ferrous Metal Foundries
+3387,"Công nghiệp, sản xuất","Electroplating, Plating, Polishing Services"
+3389,"Công nghiệp, sản xuất",Non-Precious Metal Services
+3390,"Công nghiệp, sản xuất",Miscellaneous Metalwork
+3393,"Công nghiệp, sản xuất",Heat Treating Metal Services
+3395,"Công nghiệp, sản xuất",Welding Repair
+3405,"Công nghiệp, sản xuất",Ironwork
+3504,"Nhà cửa, xây dựng",Gardening Supplies
+3509,"Công nghiệp, sản xuất",Industrial Equipment and Supplies
+3596,"Công nghiệp, sản xuất",Miscellaneous Machinery and Parts Manufacturing
+3640,"Nhà cửa, xây dựng","Lighting, Fixtures, Electrical Supplies"
+3684,"Công nghiệp, sản xuất",Semiconductors and Related Devices
+3722,"Đi lại, du lịch",Passenger Railways
+3730,"Công nghiệp, sản xuất",Ship Chandlers
+3771,"Đi lại, du lịch",Railroad Passenger Transport
+3775,"Công nghiệp, sản xuất",Railroad Freight
+3780,"Dịch vụ, tiện ích",Computer Network Services
+4111,"Đi lại, du lịch",Local and Suburban Commuter Transportation
+4112,"Đi lại, du lịch",Passenger Railways
+4121,"Đi lại, du lịch",Taxicabs and Limousines
+4131,"Đi lại, du lịch",Bus Lines
+4214,"Công nghiệp, sản xuất",Motor Freight Carriers and Trucking
+4411,"Đi lại, du lịch",Cruise Lines
+4511,"Đi lại, du lịch",Airlines
+4722,"Đi lại, du lịch",Travel Agencies
+4784,"Đi lại, du lịch",Tolls and Bridge Fees
+4814,"Dịch vụ, tiện ích",Telecommunication Services
+4829,"Dịch vụ, tiện ích",Money Transfer
+4899,"Dịch vụ, tiện ích","Cable, Satellite, and Other Pay Television Services"
+4900,"Dịch vụ, tiện ích","Utilities - Electric, Gas, Water, Sanitary"
+5045,Mua sắm bán lẻ,"Computers, Computer Peripheral Equipment"
+5094,Mua sắm bán lẻ,Precious Stones and Metals
+5192,Mua sắm bán lẻ,"Books, Periodicals, Newspapers"
+5193,Mua sắm bán lẻ,"Florists Supplies, Nursery Stock and Flowers"
+5211,"Nhà cửa, xây dựng",Lumber and Building Materials
+5251,"Nhà cửa, xây dựng",Hardware Stores
+5261,"Nhà cửa, xây dựng",Lawn and Garden Supply Stores
+5300,Mua sắm bán lẻ,Wholesale Clubs
+5310,Mua sắm bán lẻ,Discount Stores
+5311,Mua sắm bán lẻ,Department Stores
+5411,"Thực phẩm, tạp hóa","Grocery Stores, Supermarkets"
+5499,"Thực phẩm, tạp hóa",Miscellaneous Food Stores
+5533,"Ô tô, xăng dầu",Automotive Parts and Accessories Stores
+5541,"Ô tô, xăng dầu",Service Stations
+5621,Mua sắm bán lẻ,Women's Ready-To-Wear Stores
+5651,Mua sắm bán lẻ,Family Clothing Stores
+5655,Mua sắm bán lẻ,"Sports Apparel, Riding Apparel Stores"
+5661,Mua sắm bán lẻ,Shoe Stores
+5712,"Nhà cửa, xây dựng","Furniture, Home Furnishings, and Equipment Stores"
+5719,"Nhà cửa, xây dựng",Miscellaneous Home Furnishing Stores
+5722,"Nhà cửa, xây dựng",Household Appliance Stores
+5732,Mua sắm bán lẻ,Electronics Stores
+5733,Mua sắm bán lẻ,Music Stores - Musical Instruments
+5812,Ăn uống,Eating Places and Restaurants
+5813,Ăn uống,Drinking Places (Alcoholic Beverages)
+5814,Ăn uống,Fast Food Restaurants
+5815,Giải trí,"Digital Goods - Media, Books, Apps"
+5816,Giải trí,Digital Goods - Games
+5912,Y tế,Drug Stores and Pharmacies
+5921,"Thực phẩm, tạp hóa","Package Stores, Beer, Wine, Liquor"
+5932,Mua sắm bán lẻ,Antique Shops
+5941,Mua sắm bán lẻ,Sporting Goods Stores
+5942,Mua sắm bán lẻ,Book Stores
+5947,Mua sắm bán lẻ,"Gift, Card, Novelty Stores"
+5970,Mua sắm bán lẻ,"Artist Supply Stores, Craft Shops"
+5977,Mua sắm bán lẻ,Cosmetic Stores
+6300,"Dịch vụ, tiện ích","Insurance Sales, Underwriting"
+7011,"Đi lại, du lịch","Lodging - Hotels, Motels, Resorts"
+7210,"Dịch vụ, tiện ích",Laundry Services
+7230,"Dịch vụ, tiện ích",Beauty and Barber Shops
+7276,"Dịch vụ, tiện ích",Tax Preparation Services
+7349,"Dịch vụ, tiện ích",Cleaning and Maintenance Services
+7393,"Dịch vụ, tiện ích","Detective Agencies, Security Services"
+7531,"Ô tô, xăng dầu",Automotive Body Repair Shops
+7538,"Ô tô, xăng dầu",Automotive Service Shops
+7542,"Ô tô, xăng dầu",Car Washes
+7549,"Ô tô, xăng dầu",Towing Services
+7801,Giải trí,"Athletic Fields, Commercial Sports"
+7802,Giải trí,"Recreational Sports, Clubs"
+7832,Giải trí,Motion Picture Theaters
+7922,Giải trí,Theatrical Producers
+7995,Giải trí,"Betting (including Lottery Tickets, Casinos)"
+7996,Giải trí,"Amusement Parks, Carnivals, Circuses"
+8011,Y tế,"Doctors, Physicians"
+8021,Y tế,Dentists and Orthodontists
+8041,Y tế,Chiropractors
+8043,Y tế,"Optometrists, Optical Goods and Eyeglasses"
+8049,Y tế,Podiatrists
+8062,Y tế,Hospitals
+8099,Y tế,Medical Services
+8111,"Dịch vụ, tiện ích",Legal Services and Attorneys
+8931,"Dịch vụ, tiện ích","Accounting, Auditing, and Bookkeeping Services"
+9402,"Dịch vụ, tiện ích",Postal Services - Government Only
