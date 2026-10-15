@@ -45,6 +45,8 @@ Mọi cột nghiệp vụ đều là `string`, giữ nguyên giá trị nguồn 
 
 Mọi bảng Silver có thêm `_batch_id string` (batch nạp gần nhất) và `_updated_at timestamp`.
 
+Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới và bảng hiện có (full outer join theo khóa), rồi `MERGE INTO` chỉ các dòng thêm/sửa/xóa. Vì vậy `_updated_at` chỉ đổi khi dòng thực sự đổi, và chạy lại khi Bronze không đổi thì không tạo snapshot mới. Silver chỉ đọc batch Bronze có lần nạp gần nhất là SUCCESS trong `ops.ingestion_log`. Mọi phép parse dùng `try_cast` sau khi kiểm tra định dạng bằng regex, vì Spark 4 bật ANSI mode (ép kiểu sai làm dừng cả job). Iceberg không có kiểu `smallint`: các cột ghi `smallint` dưới đây được lưu thành `int`.
+
 ### silver.customers (khóa `customer_id`)
 
 | Cột | Kiểu | Từ nguồn |
@@ -80,14 +82,14 @@ Mọi bảng Silver có thêm `_batch_id string` (batch nạp gần nhất) và 
 |---|---|---|
 | mcc_code | int | |
 | description | string | |
-| mcc_group | string | Bảng ánh xạ tự xây, khoảng 10 nhóm (tuần 5) |
+| mcc_group | string | 10 nhóm, bảng ánh xạ tự xây [mcc_groups.csv](../spark/transform/ref/mcc_groups.csv); mã chưa có trong bảng → `Chưa phân nhóm` |
 
-### silver.transactions (khóa `transaction_id`, partition `months(transaction_ts)`, ghi bằng MERGE INTO)
+### silver.transactions (khóa `transaction_id`, partition `months(transaction_ts)`, ghi bằng MERGE INTO theo từng tháng)
 
 | Cột | Kiểu | Biến đổi |
 |---|---|---|
 | transaction_id | bigint | id |
-| transaction_ts | timestamp | date |
+| transaction_ts | timestamp_ntz | date. Iceberg `timestamp` không múi giờ: giờ giao dịch là giờ địa phương |
 | customer_id, card_id | int | client_id, card_id |
 | amount | decimal(12,2) | `'$-77.00'` → -77.00 |
 | channel | string | `Swipe Transaction` → `Swipe`, tương tự `Chip`, `Online` |
@@ -95,20 +97,20 @@ Mọi bảng Silver có thêm `_batch_id string` (batch nạp gần nhất) và 
 | merchant_city, merchant_state | string | Giữ nguyên |
 | zip | string | `'2840.0'` → `'02840'`; NULL khi online hoặc ở nước ngoài |
 | mcc_code | int | mcc |
-| error_list | array<string> | Tách `errors` theo dấu phẩy; mảng rỗng nếu không có lỗi |
+| error_list | array<string> | Tách `errors` theo dấu phẩy, giữ thứ tự; mảng rỗng nếu không có lỗi (22 tổ hợp lỗi + mảng rỗng) |
 | has_error | boolean | size(error_list) > 0 |
 | is_refund | boolean | amount < 0 |
 | is_online | boolean | channel = Online |
 | is_foreign | boolean | merchant_state không NULL và không phải mã bang 2 ký tự |
 
-Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.quarantine_transactions`.
+Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.quarantine_transactions`. Thứ tự xét: R01 (id rỗng hoặc không phải số) → R02 (amount, date không parse được) → R03 (ngoài tháng của batch) → R01 (trùng id: giữ bản có `transaction_ts` sớm nhất). Sau mỗi tháng job đối soát R10 vế 2: bronze = silver + quarantine.
 
 ### silver.merchants (khóa `merchant_id`, suy ra từ silver.transactions)
 
 | Cột | Kiểu | Ghi chú |
 |---|---|---|
 | merchant_id | int | |
-| merchant_city, merchant_state, zip | string | Vị trí xuất hiện nhiều nhất của merchant |
+| merchant_city, merchant_state, zip | string | Vị trí xuất hiện nhiều nhất của merchant; hòa thì lấy vị trí có giao dịch gần nhất, rồi theo thứ tự chữ cái |
 | is_online, is_foreign | boolean | Theo vị trí đã chọn |
 | location_count | int | Số vị trí khác nhau. Lớn hơn 1 ở 21,6% merchant và được ghi vào DQ |
 | txn_count | bigint | |
@@ -190,5 +192,5 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 |---|---|---|
 | ops.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
 | ops.dq_results | run_id, batch_id, rule_id, severity, checked_count, failed_count, failed_ratio, status (PASS / WARN / BLOCK), created_at | Job Silver, R13 |
-| ops.quarantine_transactions | Các cột của bronze.transactions_raw + rule_id, reason, run_id, quarantined_at | Job Silver |
+| ops.quarantine_transactions | Các cột của bronze.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver (tuần 5) |
 | ops.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |

@@ -7,7 +7,7 @@ Luồng dữ liệu: PostgreSQL `core_card` → Bronze → Silver → Gold (Apac
 ## Yêu cầu
 
 - Docker Desktop (Compose v2). Máy nên có ≥ 16 GB RAM, ≥ 4 nhân CPU và ≥ 50 GB đĩa trống. Máy ít RAM thì dùng `make up-core`.
-- [uv](https://docs.astral.sh/uv/) để chạy profiling và test trên máy host.
+- [uv](https://docs.astral.sh/uv/) để chạy profiling và test trên máy host; Java 17 để `make test` chạy Spark local (lần đầu uv tải pyspark ~430 MB).
 - Bộ dữ liệu [Financial Transactions Dataset](https://www.kaggle.com/datasets/computingvictor/transactions-fraud-datasets), giải nén vào `data/raw/` (không commit). Nếu đặt ở chỗ khác thì truyền `DATA_DIR=…`.
 
 ## Chạy nhanh
@@ -23,6 +23,9 @@ make seed-status
 make bronze-ref                              # customers, cards (token hóa), mcc_codes → Bronze
 make bronze-range FROM=2010-01 TO=2019-10    # giao dịch 118 tháng → Bronze (make bronze MONTH=… cho một tháng)
 make bronze-status
+make silver-ref                               # customers, cards, mcc_codes → Silver
+make silver-range FROM=2010-01 TO=2019-10     # giao dịch → Silver (MERGE theo tháng, cách ly R01–R03) + merchants
+make silver-status
 ```
 
 Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
@@ -63,7 +66,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── spark/
 │   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, ingestion_log)
 │   ├── extract/          # extract_jdbc.py, load_files.py
-│   ├── transform/        # silver_*.py, gold_*.py, marts.py
+│   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv), gold_*.py, marts.py
 │   ├── quality/          # rules.py, reconcile.py, pan_scan.py
 │   └── maintenance/      # iceberg_maintenance.py, erase_customer.py
 ├── airflow/dags/         # dag_reference, dag_monthly, dag_rebuild, dag_maintenance
@@ -84,7 +87,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 2 | Dựng môi trường, Spark ghi → Trino đọc | ✅ Xong. Xem [docs/week2.md](docs/week2.md) |
 | 3 | Nguồn giả lập, thiết kế | ✅ Xong. Xem [docs/week3.md](docs/week3.md) |
 | 4 | Bronze | ✅ Xong. Xem [docs/week4.md](docs/week4.md) |
-| 5 | Silver | ⏳ |
+| 5 | Silver | ✅ Xong. Xem [docs/week5.md](docs/week5.md) |
+| 6 | Data quality, Airflow (1) | ⏳ |
 
 ## Bảo mật
 
