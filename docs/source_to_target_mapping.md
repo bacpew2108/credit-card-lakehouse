@@ -1,4 +1,4 @@
-# Mapping nguồn → Gold (tuần 3)
+# Mapping nguồn → Gold (tuần 3, cập nhật tuần 5)
 
 Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi ra sao, và rule DQ nào kiểm tra nó. Kiểu dữ liệu chi tiết nằm trong [data_model.md](data_model.md). Ký hiệu **✗** nghĩa là cột dừng lại ở tầng đó, không đi tiếp.
 
@@ -65,7 +65,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 |---|---|---|---|---|
 | mcc | mcc | mcc_code | mcc_code (NK), mcc_key | Ép int |
 | description | description | description | description | |
-| – | – | mcc_group | mcc_group | Bảng ánh xạ tự xây, khoảng 10 nhóm |
+| – | – | mcc_group | mcc_group | Bảng ánh xạ tự xây [mcc_groups.csv](../spark/transform/ref/mcc_groups.csv): 109 mã, 10 nhóm; mã thiếu → `Chưa phân nhóm` |
 
 `mcc_codes.json` gốc là một JSON object duy nhất. `seed_source.py` chuyển nó thành JSON Lines (`{"mcc": "5812", "description": "…"}`) và đặt ở `s3://landing/reference/mcc_codes/mcc_codes.jsonl`.
 
@@ -73,7 +73,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 
 | Bảng | Suy ra từ | Cách dựng |
 |---|---|---|
-| silver.merchants → dim_merchant | silver.transactions | Theo từng merchant_id, lấy vị trí (city, state, zip) xuất hiện nhiều nhất |
+| silver.merchants → dim_merchant | silver.transactions | Theo từng merchant_id, lấy vị trí (city, state, zip) xuất hiện nhiều nhất; hòa thì lấy vị trí gần nhất, rồi theo thứ tự chữ cái |
 | dim_txn_profile | silver.transactions | DISTINCT (channel, error_combo, has_error, is_refund) |
 | dim_date | Lịch | Sinh từ 2010-01-01 đến 2019-12-31 |
 | mart_* | fact + dimension | Xem data_model.md mục 3 |

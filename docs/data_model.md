@@ -1,8 +1,8 @@
-# Mô hình dữ liệu (tuần 3)
+# Mô hình dữ liệu (tuần 3, cập nhật tuần 5)
 
 Đặc tả cột của các tầng Bronze, Silver, Gold và schema `ops`, chi tiết hóa mục 5 và Hình 3–4 của Design Doc. Tuần 4–7 code theo tài liệu này; khi có thay đổi thì sửa ở đây trước.
 
-- Catalog `lakehouse`, namespace `bronze`, `silver`, `gold`, `ops`. Iceberg format v2.
+- Catalog `lakehouse` (Lakekeeper), namespace `bronze`, `silver`, `gold`, `ops`. Iceberg format v2. Namespace là khái niệm của catalog: mọi bảng đều lưu trong bucket MinIO `warehouse`, không có bucket riêng cho từng tầng.
 - Kiểu dữ liệu ghi theo Spark SQL: `int`, `bigint`, `smallint`, `decimal(p,s)`, `string`, `date`, `timestamp`, `boolean`, `array<string>`.
 - `timestamp` là timestamp không múi giờ (dữ liệu gốc không có múi giờ). Spark dùng `timestamp_ntz`, Trino thấy là `timestamp(6)`.
 - Mapping từng cột từ nguồn lên Gold nằm trong [source_to_target_mapping.md](source_to_target_mapping.md). Mức dữ liệu cá nhân của từng cột nằm trong [data_catalog.csv](data_catalog.csv).

@@ -52,7 +52,7 @@ Silver không có `FORCE`. Mỗi lần chạy, job so dữ liệu mới với b�
 | Cờ và cột chuẩn hóa | ✅ Hoàn tiền 660.049; amount = 0: 10.639; online 1.557.912; nước ngoài 89.006; có lỗi 211.393; zip NULL 1.652.706, zip sai định dạng 0; channel đúng 3 giá trị |
 | `error_list` | ✅ 22 tổ hợp lỗi + mảng rỗng |
 | Vi phạm R07 có sẵn (city = ONLINE nhưng không phải Online) | 5.788, khớp profiling (rule chạy ở tuần 6) |
-| Bố cục bảng | ✅ 118 partition `months(transaction_ts)`, 1 file mỗi tháng, 226,8 MB; `transaction_ts` là `timestamp(6)` không múi giờ |
+| Bố cục bảng | ✅ 118 partition `months(transaction_ts)`, 1 file mỗi tháng, 226,8 MB (trong bucket `warehouse`, cùng chỗ với Bronze); `transaction_ts` là `timestamp(6)` không múi giờ |
 | silver.customers / cards / mcc_codes | ✅ 2.000 / 6.146 (Prepaid 578; hạn mức bằng 0: 31; 0 ngày parse lỗi) / 109 (10 nhóm) |
 | silver.merchants | ✅ 74.831 merchant; 16.182 (21,6%) có nhiều vị trí, nhiều nhất 4.403; tổng `txn_count` = 13.305.915 |
 | Chạy lại khi Bronze không đổi | ✅ Thêm 0, sửa 0, xóa 0; không tạo snapshot mới (customers vẫn chỉ có 1 snapshot) |

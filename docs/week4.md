@@ -60,7 +60,7 @@ Mỗi batch chạy qua `run_batch`:
 | Tính lại HMAC từ PAN ở nguồn cho cả 6.146 thẻ | ✅ 6.146/6.146 token, BIN, last4 khớp; 0 dòng chứa PAN đầy đủ |
 | Tháng sai định dạng (`MONTH=2019-3`) | ✅ Bị chặn ở bước kiểm tra tham số, không khởi động Spark |
 | Tháng không có dữ liệu (`MONTH=2009-12`) | ✅ Ghi FAILED vào ingestion_log kèm thông báo lỗi, `make` thoát với mã lỗi |
-| Dung lượng | transactions_raw 220,5 MB, 118 file Parquet (1 file mỗi tháng); cards_raw 0,4 MB |
+| Dung lượng | transactions_raw 220,5 MB, 118 file Parquet (1 file mỗi tháng); cards_raw 0,4 MB. Tất cả nằm trong bucket `warehouse` |
 
 ## Quyết định thiết kế
 
@@ -73,8 +73,8 @@ Mỗi batch chạy qua `run_batch`:
 
 ## Lưu ý
 
-- **Nếu R10 lệch, dữ liệu vẫn đã được commit vào Bronze**, chỉ ingestion_log mang trạng thái FAILED. Tuần 5–6: Silver chỉ đọc những batch có lần nạp gần nhất là SUCCESS, và DAG dừng khi task Bronze thất bại.
-- Trino giới hạn bộ nhớ khoảng 500 MB mỗi node. `count(DISTINCT id)` trên 13 triệu chuỗi, nhóm theo tháng, bị vượt giới hạn; ép `id` sang số nguyên và đếm toàn bảng thì chạy được. Cần chú ý điều này với truy vấn nặng ở tuần 11.
+- **Nếu R10 lệch, dữ liệu vẫn đã được commit vào Bronze**, chỉ ingestion_log mang trạng thái FAILED. Tuần 5 đã chặn việc này ở Silver: `require_bronze` chỉ cho dựng Silver khi lần nạp gần nhất là SUCCESS. Tuần 6: DAG dừng khi task Bronze thất bại.
+- Trino giới hạn bộ nhớ khoảng 500 MB mỗi node. `count(DISTINCT id)` trên 13 triệu chuỗi, nhóm theo tháng, bị vượt giới hạn; ép `id` sang số nguyên và đếm toàn bảng thì chạy được.
 - Có 244 ô trong `card_token` chứa chuỗi 13–19 chữ số liền nhau. Đây là trùng hợp ngẫu nhiên trong chuỗi hex, không phải PAN. Vì vậy R13 (tuần 8) phải so HMAC của chuỗi tìm được với token, không chỉ dùng regex (đúng như R13 trong Design Doc).
 - Mỗi batch thêm một snapshot cho bảng giao dịch và một cho `ops.ingestion_log`. dag_maintenance (tuần 8) sẽ chạy `expire_snapshots` và `rewrite_manifests`.
 - `_batch_id` của tham chiếu theo ngày UTC. Nạp lại tham chiếu trong cùng ngày thì phải thêm `FORCE=1`.

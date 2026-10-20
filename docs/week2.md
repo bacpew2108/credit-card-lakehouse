@@ -16,7 +16,8 @@ Demo cuối mốc: `make up` khởi động đủ dịch vụ, có healthcheck; 
 
 - **Profile:** `make up-core` chạy các dịch vụ không gắn profile, không có Superset. `make up` thêm profile `bi`.
 - **Giới hạn RAM** (`mem_limit`): scheduler 3 GB (chạy Spark), Trino 2 GB, các dịch vụ khác 256 MB – 1 GB.
-- **Namespace Iceberg** `bronze`, `silver`, `gold`, `ops` được tạo bởi `spark/smoke_test.py`.
+- **Namespace Iceberg** `bronze`, `silver`, `gold`, `ops` được tạo bởi `spark/smoke_test.py`. Từ tuần 4, mọi job cũng tự tạo `bronze`, `silver`, `ops` khi khởi động (`get_spark`).
+- **Tầng là namespace, không phải bucket.** Mọi bảng của cả bốn namespace nằm chung bucket `warehouse`, mỗi bảng một thư mục UUID dưới `warehouse/lakehouse/`. Lakekeeper giữ ánh xạ tên bảng → file metadata hiện tại; metadata Iceberg (JSON, Avro) và dữ liệu Parquet đều nằm trên MinIO. Bucket `landing` chỉ chứa file thô chưa thành bảng.
 
 ## Kết quả kiểm chứng (2026-10-11, Docker Desktop 8 GB RAM, 8 CPU, Apple Silicon)
 
@@ -26,20 +27,19 @@ Demo cuối mốc: `make up` khởi động đủ dịch vụ, có healthcheck; 
 | Giao diện Airflow, Superset, Lakekeeper, Trino, MinIO | Đều trả HTTP 200 |
 | `make smoke`: Spark ghi 3 dòng → Trino đọc + ghi 1 dòng → Spark đọc lại | ✅ `{'spark': 3, 'trino': 1}`, chạy 2 lần liên tiếp cho cùng kết quả |
 | `dag_smoke_test` (Airflow → BashOperator → spark-submit) | ✅ success, **17 giây** |
-| Dữ liệu trên MinIO | Parquet nằm ở `warehouse/lakehouse/<table-uuid>/data/created_at_day=…/`, partition ẩn `days(created_at)` hoạt động |
+| Dữ liệu trên MinIO | Parquet nằm ở `warehouse/lakehouse/<table-uuid>/data/created_at_day=…/`, metadata ở `…/<table-uuid>/metadata/`; partition ẩn `days(created_at)` hoạt động |
 | Chạy lại `init.sh` của postgres-meta và bootstrap Lakekeeper | Idempotent, không lỗi |
 | RAM khi nghỉ (`docker stats`) | ≈ 2,4 GB tổng; Trino ≈ 1 GB, Airflow ≈ 0,8 GB, Superset ≈ 0,2 GB |
 
-## Điểm quyết định về Spark (mục 12, tuần 2)
+## Spark
 
-**Quyết định: giữ Spark (local[*] trong container Airflow).** Không cần kích hoạt phương án dự phòng Trino + dbt-trino (mục 14).
+**Quyết định: giữ Spark (local[*] trong container Airflow).**
 
 Lý do:
-- Spark 4.0.4 ghi được bảng Iceberg qua Lakekeeper, Trino 480 đọc và ghi được cùng bảng đó, và chiều ngược lại cũng thông. Đây đúng là điều kiện rủi ro "Spark chưa ghi được vào Iceberg qua REST Catalog sau tuần 2", và nó đã được loại bỏ.
-- Chi phí khởi động Spark khoảng **3–4 giây** mỗi lần `spark-submit`; một job nhỏ tổng cộng khoảng 10 giây. Với 118 batch tháng, phần khởi động chỉ cộng thêm vài phút cho toàn bộ backfill, chấp nhận được. Con số so sánh chính xác giữa Spark và Trino (mục 11.2) sẽ đo ở tuần 11 với batch thật.
+- Chi phí khởi động Spark khoảng **3–4 giây** mỗi lần `spark-submit`; một job nhỏ tổng cộng khoảng 10 giây. Với 118 batch tháng, phần khởi động chỉ cộng thêm vài phút cho toàn bộ backfill.
 - Spark và Trino dùng **cùng bản Iceberg 1.10.1**. Trino 480 đóng gói sẵn 1.10.1, nên Spark được chọn theo, đúng nguyên tắc "tổ hợp đã kiểm chứng tương thích".
 
-## Lưu ý kỹ thuật phát hiện khi thử nghiệm
+## Lưu ý
 
 1. **`CREATE OR REPLACE TABLE` chỉ có DDL trong Spark không xóa dữ liệu cũ** khi đi qua Lakekeeper: snapshot mới vẫn nối tiếp snapshot cũ. Trong khi đó, `CREATE OR REPLACE TABLE … AS SELECT` (cả Spark lẫn Trino) chạy đúng.
    → Không dùng REPLACE chỉ có DDL. Pipeline dùng `overwritePartitions()` hoặc `MERGE INTO` như thiết kế; khi cần dựng lại bảng thì dùng `DROP TABLE` rồi `CREATE TABLE`.
