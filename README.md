@@ -4,6 +4,19 @@ Hệ thống Data Lakehouse quy mô nhỏ phục vụ phân tích dữ liệu gi
 
 Luồng dữ liệu: PostgreSQL `core_card` → Bronze → Silver → Gold (Apache Iceberg trên MinIO) → Trino → Superset, điều phối bằng Airflow. Thiết kế chi tiết nằm trong `Design_Doc.docx`.
 
+## Dữ liệu nằm ở đâu
+
+| Thành phần | Lưu gì |
+|---|---|
+| PostgreSQL `postgres-source` (`core_card`) | Hệ thống nguồn giả lập: customers, cards, transactions |
+| MinIO, bucket `landing` | File thô chưa thành bảng: `reference/mcc_codes/mcc_codes.jsonl` |
+| MinIO, bucket `warehouse` | **Mọi bảng Iceberg** của Bronze, Silver, Gold, ops: file dữ liệu Parquet (`data/`) và file metadata Iceberg (`metadata/`) |
+| Lakekeeper (database `lakekeeper` trong `postgres-meta`) | Catalog: danh sách namespace, bảng và đường dẫn tới file metadata hiện tại của từng bảng |
+
+Bronze, Silver, Gold, ops là **namespace** trong catalog `lakehouse`, không phải bucket. Trên MinIO, mỗi bảng là một thư mục theo UUID dưới `warehouse/lakehouse/`, không mang tên tầng. Muốn biết bảng nằm ở đâu thì xem trong Lakekeeper UI hoặc truy vấn `SELECT "$path" FROM lakehouse.silver.transactions LIMIT 1` qua Trino. Không xóa hay sửa tay file trong bucket `warehouse`: catalog sẽ trỏ tới file không còn tồn tại.
+
+Khi Spark hoặc Trino đọc một bảng: hỏi Lakekeeper đường dẫn file metadata hiện tại → đọc metadata trên MinIO để biết file Parquet nào thuộc snapshot mới nhất → đọc các file Parquet đó. Khi ghi: ghi Parquet và metadata mới lên MinIO, rồi Lakekeeper đổi con trỏ sang metadata mới trong một thao tác nguyên tử.
+
 ## Yêu cầu
 
 - Docker Desktop (Compose v2). Máy nên có ≥ 16 GB RAM, ≥ 4 nhân CPU và ≥ 50 GB đĩa trống. Máy ít RAM thì dùng `make up-core`.
@@ -64,16 +77,17 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── data/raw/             # bộ dữ liệu Kaggle (không commit)
 ├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
-│   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, ingestion_log)
+│   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, ingestion_log, MERGE)
 │   ├── extract/          # extract_jdbc.py, load_files.py
-│   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv), gold_*.py, marts.py
-│   ├── quality/          # rules.py, reconcile.py, pan_scan.py
-│   └── maintenance/      # iceberg_maintenance.py, erase_customer.py
-├── airflow/dags/         # dag_reference, dag_monthly, dag_rebuild, dag_maintenance
-├── sql/                  # truy vấn Q1–Q10, demo Iceberg
+│   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv); gold_*.py, marts.py (tuần 7)
+│   ├── quality/          # rules.py, reconcile.py, pan_scan.py (tuần 6, 8)
+│   └── maintenance/      # iceberg_maintenance.py, erase_customer.py (tuần 8–10)
+├── airflow/dags/         # dag_smoke_test; dag_reference, dag_monthly (tuần 6), dag_rebuild, dag_maintenance
+├── sql/                  # truy vấn Q1–Q10, demo Iceberg (tuần 11)
 ├── tests/                # pytest
 └── docs/
     ├── profiling/        # báo cáo profiling tuần 1
+    ├── week2.md … week5.md  # tổng kết từng tuần
     ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
     ├── source_to_target_mapping.md
     └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
