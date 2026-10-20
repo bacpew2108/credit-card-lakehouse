@@ -57,14 +57,14 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 
 | Thành phần | Phiên bản | Trạng thái |
 |---|---|---|
-| Apache Iceberg | 1.10.1, table format v2 (cùng bản Trino 480 đóng gói) | ✅ Kiểm chứng tuần 2 |
-| Iceberg REST Catalog | Lakekeeper v0.13.6 | ✅ Kiểm chứng tuần 2 |
+| Apache Iceberg | 1.10.1, table format v2 (cùng bản Trino 480 đóng gói) | Kiểm chứng tuần 2 |
+| Iceberg REST Catalog | Lakekeeper v0.13.6 | Kiểm chứng tuần 2 |
 | Object storage | MinIO `RELEASE.2025-09-07T16-13-09Z` | Đang dùng |
-| Trino | 480 (Iceberg connector, native S3) | ✅ |
-| Apache Spark | PySpark 4.0.4 (Scala 2.13), OpenJDK 17, `iceberg-spark-runtime-4.0_2.13:1.10.1`, `iceberg-aws-bundle:1.10.1`, PostgreSQL JDBC 42.7.8 | ✅ Kiểm chứng tuần 2 (`make smoke`) |
-| Apache Airflow | 3.3.1, LocalExecutor, image `lakehouse-airflow` có Java + PySpark | ✅ |
-| Apache Superset | 6.0.0 + `trino` 0.340.0 + `psycopg2-binary` 2.9.13 | ✅ |
-| PostgreSQL | 16 (`postgres-meta`: 3 database; `postgres-source`: core_card) | ✅ |
+| Trino | 480 (Iceberg connector, native S3) | Đang dùng |
+| Apache Spark | PySpark 4.0.4 (Scala 2.13), OpenJDK 17, `iceberg-spark-runtime-4.0_2.13:1.10.1`, `iceberg-aws-bundle:1.10.1`, PostgreSQL JDBC 42.7.8 | Kiểm chứng tuần 2 (`make smoke`) |
+| Apache Airflow | 3.3.1, LocalExecutor, image `lakehouse-airflow` có Java + PySpark | Đang dùng |
+| Apache Superset | 6.0.0 + `trino` 0.340.0 + `psycopg2-binary` 2.9.13 | Đang dùng |
+| PostgreSQL | 16 (`postgres-meta`: 3 database; `postgres-source`: core_card) | Đang dùng |
 | Python host | 3.13, DuckDB 1.5.6, psycopg 3.3.5, minio 7.2.20 | Profiling, seed nguồn, test |
 
 ## Cấu trúc thư mục
@@ -97,12 +97,12 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 
 | Tuần | Nội dung | Trạng thái |
 |---|---|---|
-| 1 | Chốt đề tài, profiling, phiên bản, khung repo | ✅ Xong. Xem [docs/profiling/README.md](docs/profiling/README.md) |
-| 2 | Dựng môi trường, Spark ghi → Trino đọc | ✅ Xong. Xem [docs/week2.md](docs/week2.md) |
-| 3 | Nguồn giả lập, thiết kế | ✅ Xong. Xem [docs/week3.md](docs/week3.md) |
-| 4 | Bronze | ✅ Xong. Xem [docs/week4.md](docs/week4.md) |
-| 5 | Silver | ✅ Xong. Xem [docs/week5.md](docs/week5.md) |
-| 6 | Data quality, Airflow (1) | ⏳ |
+| 1 | Chốt đề tài, profiling, phiên bản, khung repo | Xong. Xem [docs/profiling/README.md](docs/profiling/README.md) |
+| 2 | Dựng môi trường, Spark ghi → Trino đọc | Xong. Xem [docs/week2.md](docs/week2.md) |
+| 3 | Nguồn giả lập, thiết kế | Xong. Xem [docs/week3.md](docs/week3.md) |
+| 4 | Bronze | Xong. Xem [docs/week4.md](docs/week4.md) |
+| 5 | Silver | Xong. Xem [docs/week5.md](docs/week5.md) |
+| 6 | Data quality, Airflow (1) | Tiếp theo |
 
 ## Bảo mật
 

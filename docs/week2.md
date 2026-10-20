@@ -25,8 +25,8 @@ Demo cuối mốc: `make up` khởi động đủ dịch vụ, có healthcheck; 
 |---|---|
 | `make up` từ trạng thái đã có image | Đủ 14 container healthy hoặc exit 0 sau **≈ 34 giây** |
 | Giao diện Airflow, Superset, Lakekeeper, Trino, MinIO | Đều trả HTTP 200 |
-| `make smoke`: Spark ghi 3 dòng → Trino đọc + ghi 1 dòng → Spark đọc lại | ✅ `{'spark': 3, 'trino': 1}`, chạy 2 lần liên tiếp cho cùng kết quả |
-| `dag_smoke_test` (Airflow → BashOperator → spark-submit) | ✅ success, **17 giây** |
+| `make smoke`: Spark ghi 3 dòng → Trino đọc + ghi 1 dòng → Spark đọc lại | `{'spark': 3, 'trino': 1}`, chạy 2 lần liên tiếp cho cùng kết quả |
+| `dag_smoke_test` (Airflow → BashOperator → spark-submit) | success, **17 giây** |
 | Dữ liệu trên MinIO | Parquet nằm ở `warehouse/lakehouse/<table-uuid>/data/created_at_day=…/`, metadata ở `…/<table-uuid>/metadata/`; partition ẩn `days(created_at)` hoạt động |
 | Chạy lại `init.sh` của postgres-meta và bootstrap Lakekeeper | Idempotent, không lỗi |
 | RAM khi nghỉ (`docker stats`) | ≈ 2,4 GB tổng; Trino ≈ 1 GB, Airflow ≈ 0,8 GB, Superset ≈ 0,2 GB |
