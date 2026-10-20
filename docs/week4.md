@@ -47,19 +47,19 @@ Mỗi batch chạy qua `run_batch`:
 
 | Kiểm tra | Kết quả |
 |---|---|
-| `make test` | ✅ 23 passed (18 test mới, có vector RFC 4231 cho HMAC-SHA256) |
-| `make bronze-ref` | ✅ customers 2.000, cards 6.146, mcc 109; nguồn = Bronze; 38 giây cho 2 lần spark-submit |
-| `make bronze MONTH=2019-03` | ✅ 118.548 dòng, khớp tuần 3; 5,4 giây không tính thời gian khởi động Spark |
-| Chạy lại không có FORCE | ✅ Bỏ qua (cả giao dịch lẫn tham chiếu) |
-| Chạy lại với `FORCE=1` | ✅ Checksum giống hệt; `$snapshots` có thêm một snapshot `overwrite` (xóa 118.548, thêm 118.548); tổng số dòng không đổi |
-| `make bronze-range FROM=2010-01 TO=2019-10` | ✅ 117 tháng mới (2019-03 bỏ qua), 273 giây, khoảng 2 giây/tháng; chậm nhất 19,3 giây (2015-04, chỉ một lần) |
-| Chạy lại toàn bộ 118 tháng | ✅ `Đã nạp 0/118 tháng`, 22 giây |
-| Đối soát độc lập: đếm theo tháng ở Postgres so với đếm theo `_batch_id` qua Trino | ✅ 118/118 tháng khớp; 13.305.915 dòng; 0 id trùng; 0 dòng có `date` ngoài tháng của batch |
-| Tổng amount theo năm ở Bronze | ✅ Khớp báo cáo profiling cả 10 năm (VD 2019: $49.475.055,31) |
-| `bronze.cards_raw` | ✅ Không có cột `card_number` hay `cvv` |
-| Tính lại HMAC từ PAN ở nguồn cho cả 6.146 thẻ | ✅ 6.146/6.146 token, BIN, last4 khớp; 0 dòng chứa PAN đầy đủ |
-| Tháng sai định dạng (`MONTH=2019-3`) | ✅ Bị chặn ở bước kiểm tra tham số, không khởi động Spark |
-| Tháng không có dữ liệu (`MONTH=2009-12`) | ✅ Ghi FAILED vào ingestion_log kèm thông báo lỗi, `make` thoát với mã lỗi |
+| `make test` | 23 passed (18 test mới, có vector RFC 4231 cho HMAC-SHA256) |
+| `make bronze-ref` | customers 2.000, cards 6.146, mcc 109; nguồn = Bronze; 38 giây cho 2 lần spark-submit |
+| `make bronze MONTH=2019-03` | 118.548 dòng, khớp tuần 3; 5,4 giây không tính thời gian khởi động Spark |
+| Chạy lại không có FORCE | Bỏ qua (cả giao dịch lẫn tham chiếu) |
+| Chạy lại với `FORCE=1` | Checksum giống hệt; `$snapshots` có thêm một snapshot `overwrite` (xóa 118.548, thêm 118.548); tổng số dòng không đổi |
+| `make bronze-range FROM=2010-01 TO=2019-10` | 117 tháng mới (2019-03 bỏ qua), 273 giây, khoảng 2 giây/tháng; chậm nhất 19,3 giây (2015-04, chỉ một lần) |
+| Chạy lại toàn bộ 118 tháng | `Đã nạp 0/118 tháng`, 22 giây |
+| Đối soát độc lập: đếm theo tháng ở Postgres so với đếm theo `_batch_id` qua Trino | 118/118 tháng khớp; 13.305.915 dòng; 0 id trùng; 0 dòng có `date` ngoài tháng của batch |
+| Tổng amount theo năm ở Bronze | Khớp báo cáo profiling cả 10 năm (VD 2019: $49.475.055,31) |
+| `bronze.cards_raw` | Không có cột `card_number` hay `cvv` |
+| Tính lại HMAC từ PAN ở nguồn cho cả 6.146 thẻ | 6.146/6.146 token, BIN, last4 khớp; 0 dòng chứa PAN đầy đủ |
+| Tháng sai định dạng (`MONTH=2019-3`) | Bị chặn ở bước kiểm tra tham số, không khởi động Spark |
+| Tháng không có dữ liệu (`MONTH=2009-12`) | Ghi FAILED vào ingestion_log kèm thông báo lỗi, `make` thoát với mã lỗi |
 | Dung lượng | transactions_raw 220,5 MB, 118 file Parquet (1 file mỗi tháng); cards_raw 0,4 MB. Tất cả nằm trong bucket `warehouse` |
 
 ## Quyết định thiết kế

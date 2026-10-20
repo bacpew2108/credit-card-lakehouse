@@ -46,18 +46,18 @@ Silver không có `FORCE`. Mỗi lần chạy, job so dữ liệu mới với b�
 
 | Kiểm tra | Kết quả |
 |---|---|
-| `make test` | ✅ 36 passed: 13 test Silver chạy Spark local (parse tiền, ngày, zip, kênh, lỗi; tách R01–R03 với 13 dòng mẫu gồm cả trường hợp biên; merchants; 109 mã MCC đều có nhóm) |
-| silver.transactions | ✅ 13.305.915 dòng, 0 id trùng, 0 dòng bị cách ly (dữ liệu gốc sạch với R01–R03) |
-| Số giao dịch và tổng amount theo năm | ✅ Khớp profiling cả 10 năm (VD 2019: 1.159.966 dòng, $49.475.055,31) |
-| Cờ và cột chuẩn hóa | ✅ Hoàn tiền 660.049; amount = 0: 10.639; online 1.557.912; nước ngoài 89.006; có lỗi 211.393; zip NULL 1.652.706, zip sai định dạng 0; channel đúng 3 giá trị |
-| `error_list` | ✅ 22 tổ hợp lỗi + mảng rỗng |
+| `make test` | 36 passed: 13 test Silver chạy Spark local (parse tiền, ngày, zip, kênh, lỗi; tách R01–R03 với 13 dòng mẫu gồm cả trường hợp biên; merchants; 109 mã MCC đều có nhóm) |
+| silver.transactions | 13.305.915 dòng, 0 id trùng, 0 dòng bị cách ly (dữ liệu gốc sạch với R01–R03) |
+| Số giao dịch và tổng amount theo năm | Khớp profiling cả 10 năm (VD 2019: 1.159.966 dòng, $49.475.055,31) |
+| Cờ và cột chuẩn hóa | Hoàn tiền 660.049; amount = 0: 10.639; online 1.557.912; nước ngoài 89.006; có lỗi 211.393; zip NULL 1.652.706, zip sai định dạng 0; channel đúng 3 giá trị |
+| `error_list` | 22 tổ hợp lỗi + mảng rỗng |
 | Vi phạm R07 có sẵn (city = ONLINE nhưng không phải Online) | 5.788, khớp profiling (rule chạy ở tuần 6) |
-| Bố cục bảng | ✅ 118 partition `months(transaction_ts)`, 1 file mỗi tháng, 226,8 MB (trong bucket `warehouse`, cùng chỗ với Bronze); `transaction_ts` là `timestamp(6)` không múi giờ |
-| silver.customers / cards / mcc_codes | ✅ 2.000 / 6.146 (Prepaid 578; hạn mức bằng 0: 31; 0 ngày parse lỗi) / 109 (10 nhóm) |
-| silver.merchants | ✅ 74.831 merchant; 16.182 (21,6%) có nhiều vị trí, nhiều nhất 4.403; tổng `txn_count` = 13.305.915 |
-| Chạy lại khi Bronze không đổi | ✅ Thêm 0, sửa 0, xóa 0; không tạo snapshot mới (customers vẫn chỉ có 1 snapshot) |
-| **MERGE từ đầu đến cuối** (sửa tạm 3 giao dịch 2019-10 ở nguồn → Bronze `FORCE=1` → Silver) | ✅ Đổi amount → **sửa 1**; amount `N/A` → **cách ly R02** và xóa khỏi Silver; dòng bị xóa ở nguồn → **xóa**. Tổng: sửa 1, xóa 2, quarantine 1; R10: 117.373 = 117.372 + 1. Snapshot chỉ chạm 1 partition |
-| Khôi phục nguồn rồi chạy lại | ✅ Thêm 2, sửa 1; quarantine của tháng về 0; checksum Bronze và tổng 2019 trở lại đúng giá trị gốc |
+| Bố cục bảng | 118 partition `months(transaction_ts)`, 1 file mỗi tháng, 226,8 MB (trong bucket `warehouse`, cùng chỗ với Bronze); `transaction_ts` là `timestamp(6)` không múi giờ |
+| silver.customers / cards / mcc_codes | 2.000 / 6.146 (Prepaid 578; hạn mức bằng 0: 31; 0 ngày parse lỗi) / 109 (10 nhóm) |
+| silver.merchants | 74.831 merchant; 16.182 (21,6%) có nhiều vị trí, nhiều nhất 4.403; tổng `txn_count` = 13.305.915 |
+| Chạy lại khi Bronze không đổi | Thêm 0, sửa 0, xóa 0; không tạo snapshot mới (customers vẫn chỉ có 1 snapshot) |
+| **MERGE từ đầu đến cuối** (sửa tạm 3 giao dịch 2019-10 ở nguồn → Bronze `FORCE=1` → Silver) | Đổi amount → **sửa 1**; amount `N/A` → **cách ly R02** và xóa khỏi Silver; dòng bị xóa ở nguồn → **xóa**. Tổng: sửa 1, xóa 2, quarantine 1; R10: 117.373 = 117.372 + 1. Snapshot chỉ chạm 1 partition |
+| Khôi phục nguồn rồi chạy lại | Thêm 2, sửa 1; quarantine của tháng về 0; checksum Bronze và tổng 2019 trở lại đúng giá trị gốc |
 
 ### Thời gian
 

@@ -52,16 +52,16 @@ Mọi bước nằm trong **một transaction**. Nếu lỗi giữa chừng, d�
 
 | Kiểm tra | Kết quả |
 |---|---|
-| `make test` | ✅ 5 passed |
-| `make seed` | ✅ 60 giây (COPY 37 giây, tạo ràng buộc và index 23 giây) |
-| Số dòng | ✅ customers 2.000, cards 6.146, transactions 13.305.915, khớp profiling |
-| Số giao dịch và tổng amount theo từng năm 2010–2019 | ✅ Khớp báo cáo profiling cả 10 năm (VD 2010: 1.240.880 dòng, $54.232.556,12) |
-| errors NULL / zip NULL / giao dịch có nhiều lỗi | ✅ 13.094.522 / 1.652.706 / 941, khớp profiling (CSV được parse đúng) |
-| PK và FK được tạo lại thành công | ✅ Xác nhận dữ liệu gốc không trùng id, không có client_id/card_id mồ côi |
-| Lấy một tháng (03/2019, 118.548 dòng) | ✅ Index Only Scan trên `transactions_date_idx`, 39 ms |
-| Chạy lại `make seed` | ✅ Bỏ qua |
-| `make seed FORCE=1` | ✅ Nạp lại sau 100 giây (phải xóa 13,3 triệu dòng cũ trước), số dòng không đổi |
-| mcc_codes trên MinIO | ✅ `landing/reference/mcc_codes/mcc_codes.jsonl`, 109 dòng |
+| `make test` | 5 passed |
+| `make seed` | 60 giây (COPY 37 giây, tạo ràng buộc và index 23 giây) |
+| Số dòng | customers 2.000, cards 6.146, transactions 13.305.915, khớp profiling |
+| Số giao dịch và tổng amount theo từng năm 2010–2019 | Khớp báo cáo profiling cả 10 năm (VD 2010: 1.240.880 dòng, $54.232.556,12) |
+| errors NULL / zip NULL / giao dịch có nhiều lỗi | 13.094.522 / 1.652.706 / 941, khớp profiling (CSV được parse đúng) |
+| PK và FK được tạo lại thành công | Xác nhận dữ liệu gốc không trùng id, không có client_id/card_id mồ côi |
+| Lấy một tháng (03/2019, 118.548 dòng) | Index Only Scan trên `transactions_date_idx`, 39 ms |
+| Chạy lại `make seed` | Bỏ qua |
+| `make seed FORCE=1` | Nạp lại sau 100 giây (phải xóa 13,3 triệu dòng cũ trước), số dòng không đổi |
+| mcc_codes trên MinIO | `landing/reference/mcc_codes/mcc_codes.jsonl`, 109 dòng |
 | Dung lượng database | 2,1 GB |
 
 ## Quyết định thiết kế
