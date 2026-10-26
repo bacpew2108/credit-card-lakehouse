@@ -78,7 +78,7 @@ def run_reference(spark, rid, batch_id, force):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    t = sub.add_parser("transactions", help="giao dịch theo tháng → bronze.transactions_raw")
+    t = sub.add_parser("transactions", help="giao dịch theo tháng → bronze.card.transactions_raw")
     h.add_month_args(t)
     t.add_argument("--force", action="store_true")
     r = sub.add_parser("reference", help="customers, cards → bronze.*_raw")

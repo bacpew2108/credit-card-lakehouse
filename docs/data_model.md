@@ -1,8 +1,8 @@
 # Mô hình dữ liệu (tuần 3, cập nhật tuần 5)
 
-Đặc tả cột của các tầng Bronze, Silver, Gold và schema `ops`, chi tiết hóa mục 5 và Hình 3–4 của Design Doc. Tuần 4–7 code theo tài liệu này; khi có thay đổi thì sửa ở đây trước.
+Đặc tả cột của các tầng Bronze, Silver, Gold và tầng vận hành `ops`, chi tiết hóa mục 5 và Hình 3–4 của Design Doc. Tuần 4–7 code theo tài liệu này; khi có thay đổi thì sửa ở đây trước.
 
-- Catalog `lakehouse` (Lakekeeper), namespace `bronze`, `silver`, `gold`, `ops`. Iceberg format v2. Namespace là khái niệm của catalog: mọi bảng đều lưu trong bucket MinIO `warehouse`, không có bucket riêng cho từng tầng.
+- Mỗi tầng một catalog `bronze`, `silver`, `gold`, `ops`, tương ứng một warehouse Lakekeeper và một bucket MinIO cùng tên. Bảng nghiệp vụ nằm trong namespace `card`, bảng vận hành trong `ops.pipeline`. Iceberg format v2.
 - Kiểu dữ liệu ghi theo Spark SQL: `int`, `bigint`, `smallint`, `decimal(p,s)`, `string`, `date`, `timestamp`, `boolean`, `array<string>`.
 - `timestamp` là timestamp không múi giờ (dữ liệu gốc không có múi giờ). Spark dùng `timestamp_ntz`, Trino thấy là `timestamp(6)`.
 - Mapping từng cột từ nguồn lên Gold nằm trong [source_to_target_mapping.md](source_to_target_mapping.md). Mức dữ liệu cá nhân của từng cột nằm trong [data_catalog.csv](data_catalog.csv).
@@ -31,10 +31,10 @@ Mọi cột nghiệp vụ đều là `string`, giữ nguyên giá trị nguồn 
 
 | Bảng | Cột nghiệp vụ | Partition | Cách ghi |
 |---|---|---|---|
-| `bronze.transactions_raw` | id, date, client_id, card_id, amount, use_chip, merchant_id, merchant_city, merchant_state, zip, mcc, errors | `identity(_batch_id)` | `overwritePartitions()` theo `_batch_id`, nên chạy lại không nhân đôi |
-| `bronze.customers_raw` | 14 cột của `core_card.customers` | – | Ghi đè toàn bảng; snapshot cũ vẫn truy vết được |
-| `bronze.cards_raw` | Như `core_card.cards` nhưng **`card_number` → `card_token`, `card_bin`, `card_last4`; không có `cvv`** | – | Ghi đè toàn bảng |
-| `bronze.mcc_codes_raw` | mcc, description | – | Ghi đè toàn bảng |
+| `bronze.card.transactions_raw` | id, date, client_id, card_id, amount, use_chip, merchant_id, merchant_city, merchant_state, zip, mcc, errors | `identity(_batch_id)` | `overwritePartitions()` theo `_batch_id`, nên chạy lại không nhân đôi |
+| `bronze.card.customers_raw` | 14 cột của `core_card.customers` | – | Ghi đè toàn bảng; snapshot cũ vẫn truy vết được |
+| `bronze.card.cards_raw` | Như `core_card.cards` nhưng **`card_number` → `card_token`, `card_bin`, `card_last4`; không có `cvv`** | – | Ghi đè toàn bảng |
+| `bronze.card.mcc_codes_raw` | mcc, description | – | Ghi đè toàn bảng |
 
 - `card_token = hex(HMAC-SHA256(HMAC_SECRET, card_number))`, 64 ký tự. `card_bin` là 6 số đầu, `card_last4` là 4 số cuối. Việc token hóa làm ngay trong job extract, trước khi ghi, nên PAN không bao giờ chạm vào bucket warehouse.
 - Mọi cột được ép `::text` ngay trong câu truy vấn nguồn, nên Bronze giữ đúng giá trị Postgres trả về: `date` dạng `2019-03-01 00:01:00`, `latitude` dạng `38.2200` (NUMERIC(9,4) ở nguồn).
@@ -45,9 +45,9 @@ Mọi cột nghiệp vụ đều là `string`, giữ nguyên giá trị nguồn 
 
 Mọi bảng Silver có thêm `_batch_id string` (batch nạp gần nhất) và `_updated_at timestamp`.
 
-Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới và bảng hiện có (full outer join theo khóa), rồi `MERGE INTO` chỉ các dòng thêm/sửa/xóa. Vì vậy `_updated_at` chỉ đổi khi dòng thực sự đổi, và chạy lại khi Bronze không đổi thì không tạo snapshot mới. Silver chỉ đọc batch Bronze có lần nạp gần nhất là SUCCESS trong `ops.ingestion_log`. Mọi phép parse dùng `try_cast` sau khi kiểm tra định dạng bằng regex, vì Spark 4 bật ANSI mode (ép kiểu sai làm dừng cả job). Iceberg không có kiểu `smallint`: các cột ghi `smallint` dưới đây được lưu thành `int`.
+Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới và bảng hiện có (full outer join theo khóa), rồi `MERGE INTO` chỉ các dòng thêm/sửa/xóa. Vì vậy `_updated_at` chỉ đổi khi dòng thực sự đổi, và chạy lại khi Bronze không đổi thì không tạo snapshot mới. Silver chỉ đọc batch Bronze có lần nạp gần nhất là SUCCESS trong `ops.pipeline.ingestion_log`. Mọi phép parse dùng `try_cast` sau khi kiểm tra định dạng bằng regex, vì Spark 4 bật ANSI mode (ép kiểu sai làm dừng cả job). Iceberg không có kiểu `smallint`: các cột ghi `smallint` dưới đây được lưu thành `int`.
 
-### silver.customers (khóa `customer_id`)
+### silver.card.customers (khóa `customer_id`)
 
 | Cột | Kiểu | Từ nguồn |
 |---|---|---|
@@ -61,7 +61,7 @@ Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới v�
 | debt_to_income | decimal(6,3) | total_debt / yearly_income, NULL nếu thu nhập bằng 0 |
 | credit_score, num_credit_cards | smallint | |
 
-### silver.cards (khóa `card_id`)
+### silver.card.cards (khóa `card_id`)
 
 | Cột | Kiểu | Từ nguồn |
 |---|---|---|
@@ -76,7 +76,7 @@ Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới v�
 | num_cards_issued, year_pin_last_changed | smallint | |
 | credit_limit | decimal(12,2) | Bỏ `$`; 31 thẻ có giá trị 0 |
 
-### silver.mcc_codes (khóa `mcc_code`)
+### silver.card.mcc_codes (khóa `mcc_code`)
 
 | Cột | Kiểu | Ghi chú |
 |---|---|---|
@@ -84,7 +84,7 @@ Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới v�
 | description | string | |
 | mcc_group | string | 10 nhóm, bảng ánh xạ tự xây [mcc_groups.csv](../spark/transform/ref/mcc_groups.csv); mã chưa có trong bảng → `Chưa phân nhóm` |
 
-### silver.transactions (khóa `transaction_id`, partition `months(transaction_ts)`, ghi bằng MERGE INTO theo từng tháng)
+### silver.card.transactions (khóa `transaction_id`, partition `months(transaction_ts)`, ghi bằng MERGE INTO theo từng tháng)
 
 | Cột | Kiểu | Biến đổi |
 |---|---|---|
@@ -103,9 +103,9 @@ Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới v�
 | is_online | boolean | channel = Online |
 | is_foreign | boolean | merchant_state không NULL và không phải mã bang 2 ký tự |
 
-Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.quarantine_transactions`. Thứ tự xét: R01 (id rỗng hoặc không phải số) → R02 (amount, date không parse được) → R03 (ngoài tháng của batch) → R01 (trùng id: giữ bản có `transaction_ts` sớm nhất). Sau mỗi tháng job đối soát R10 vế 2: bronze = silver + quarantine.
+Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.pipeline.quarantine_transactions`. Thứ tự xét: R01 (id rỗng hoặc không phải số) → R02 (amount, date không parse được) → R03 (ngoài tháng của batch) → R01 (trùng id: giữ bản có `transaction_ts` sớm nhất). Sau mỗi tháng job đối soát R10 vế 2: bronze = silver + quarantine.
 
-### silver.merchants (khóa `merchant_id`, suy ra từ silver.transactions)
+### silver.card.merchants (khóa `merchant_id`, suy ra từ silver.card.transactions)
 
 | Cột | Kiểu | Ghi chú |
 |---|---|---|
@@ -124,20 +124,20 @@ Quy ước chung cho mọi dimension:
 - Dòng **−1 Unknown** dùng cho khóa không khớp (R04, R06). Dòng **−2 Đã xóa** dùng khi thực hiện quyền xóa dữ liệu. Các cột chuỗi của hai dòng này lần lượt là `'Unknown'` và `'Deleted'`, các cột số là NULL.
 - `dim_customer`, `dim_card` là SCD loại 1: ghi đè khi nguồn thay đổi.
 
-### dim_customer (nguồn silver.customers)
+### dim_customer (nguồn silver.card.customers)
 customer_key int PK · customer_id int NK · gender string · birth_year smallint · yearly_income decimal(12,2) · income_band string · total_debt decimal(12,2) · debt_to_income decimal(6,3) · credit_score smallint · credit_score_band string · num_credit_cards smallint · latitude double · longitude double
 
 Không có address, birth_month, current_age.
 
-### dim_card (nguồn silver.cards)
+### dim_card (nguồn silver.card.cards)
 card_key int PK · card_id int NK · customer_id int · card_brand string · card_type string · card_token string · card_last4 string · has_chip boolean · credit_limit decimal(12,2) · expires_date date · acct_open_date date · num_cards_issued smallint · year_pin_last_changed smallint
 
 Không có PAN, CVV, card_bin.
 
-### dim_merchant (nguồn silver.merchants)
+### dim_merchant (nguồn silver.card.merchants)
 merchant_key int PK · merchant_id int NK · merchant_city string · merchant_state string · zip string · is_online boolean · is_foreign boolean
 
-### dim_mcc (nguồn silver.mcc_codes)
+### dim_mcc (nguồn silver.card.mcc_codes)
 mcc_key int PK · mcc_code int NK · description string · mcc_group string
 
 ### dim_date (sinh theo lịch, 2010-01-01 → 2019-12-31)
@@ -186,11 +186,11 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 | mart_customer_segment_monthly | month × age_band × income_band × credit_score_band | customer_count, txn_count, total_amount, avg_spend_per_customer | Q7 |
 | mart_card_monthly | month × card_key | card_brand, card_type, txn_count, total_amount, credit_limit, utilization (chỉ thẻ Credit có credit_limit > 0) | Q8, Q9 |
 
-## 4. Schema ops – vận hành, chất lượng, danh mục
+## 4. Ops (`ops.pipeline`) – vận hành, chất lượng, danh mục
 
 | Bảng | Cột | Ghi bởi |
 |---|---|---|
-| ops.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
-| ops.dq_results | run_id, batch_id, rule_id, severity, checked_count, failed_count, failed_ratio, status (PASS / WARN / BLOCK), created_at | Job Silver, R13 |
-| ops.quarantine_transactions | Các cột của bronze.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver (tuần 5) |
-| ops.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
+| ops.pipeline.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
+| ops.pipeline.dq_results | run_id, batch_id, rule_id, severity, checked_count, failed_count, failed_ratio, status (PASS / WARN / BLOCK), created_at | Job Silver, R13 |
+| ops.pipeline.quarantine_transactions | Các cột của bronze.card.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver (tuần 5) |
+| ops.pipeline.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |

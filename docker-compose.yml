@@ -107,11 +107,10 @@ services:
       /bin/sh -c "
       set -e;
       mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
-      mc mb --ignore-existing local/landing;
-      mc mb --ignore-existing local/warehouse;
+      for b in landing bronze silver gold ops; do mc mb --ignore-existing local/$$b; done;
       mc admin user add local $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY;
       mc admin policy attach local readwrite --user $$MINIO_ACCESS_KEY || true;
-      echo 'MinIO ready: landing, warehouse, user' $$MINIO_ACCESS_KEY
+      echo 'MinIO ready: landing, bronze, silver, gold, ops; user' $$MINIO_ACCESS_KEY
       "
     restart: "no"
     networks:
@@ -216,7 +215,7 @@ services:
     container_name: lakekeeper-bootstrap
     entrypoint: ["/bin/sh", "/bootstrap.sh"]
     environment:
-      WAREHOUSE_NAME: lakehouse
+      WAREHOUSES: bronze silver gold ops   # mỗi tầng một warehouse, trên bucket cùng tên
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
     volumes:

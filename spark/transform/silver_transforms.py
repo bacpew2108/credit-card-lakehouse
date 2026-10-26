@@ -193,7 +193,7 @@ def split_batch(b, month):
 
 
 def transactions(valid):
-    """Batch đã qua split_batch → các cột silver.transactions (TXN_COLS)."""
+    """Batch đã qua split_batch → các cột silver.card.transactions (TXN_COLS)."""
     channel = normalize_channel(F.col("use_chip"))
     errors = split_errors(F.col("errors"))
     return valid.select(
@@ -225,7 +225,7 @@ MERCHANT_COLS = [
 
 
 def merchants(txn):
-    """Từ silver.transactions: mỗi merchant lấy vị trí (city, state, zip) có nhiều giao dịch
+    """Từ silver.card.transactions: mỗi merchant lấy vị trí (city, state, zip) có nhiều giao dịch
     nhất; hòa thì lấy vị trí gặp gần nhất, rồi theo thứ tự chữ cái để kết quả cố định."""
     loc = (txn.where(F.col("merchant_id").isNotNull())
               .groupBy("merchant_id", "merchant_city", "merchant_state", "zip")

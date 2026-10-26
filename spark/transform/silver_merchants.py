@@ -1,4 +1,4 @@
-"""Suy ra silver.merchants từ silver.transactions (mục 5.3 Design Doc).
+"""Suy ra silver.card.merchants từ silver.card.transactions (mục 5.3 Design Doc).
 
     python silver_merchants.py
 
@@ -16,8 +16,8 @@ import time
 from common import lakehouse as lh
 from transform import silver_transforms as st
 
-SOURCE = "lakehouse.silver.transactions"
-SILVER = "lakehouse.silver.merchants"
+SOURCE = "silver.card.transactions"
+SILVER = "silver.card.merchants"
 DDL = """
     merchant_id INT, merchant_city STRING, merchant_state STRING, zip STRING,
     is_online BOOLEAN, is_foreign BOOLEAN, location_count INT, txn_count BIGINT"""

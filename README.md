@@ -10,10 +10,10 @@ Luồng dữ liệu: PostgreSQL `core_card` → Bronze → Silver → Gold (Apac
 |---|---|
 | PostgreSQL `postgres-source` (`core_card`) | Hệ thống nguồn giả lập: customers, cards, transactions |
 | MinIO, bucket `landing` | File thô chưa thành bảng: `reference/mcc_codes/mcc_codes.jsonl` |
-| MinIO, bucket `warehouse` | **Mọi bảng Iceberg** của Bronze, Silver, Gold, ops: file dữ liệu Parquet (`data/`) và file metadata Iceberg (`metadata/`) |
-| Lakekeeper (database `lakekeeper` trong `postgres-meta`) | Catalog: danh sách namespace, bảng và đường dẫn tới file metadata hiện tại của từng bảng |
+| MinIO, bucket `bronze`, `silver`, `gold`, `ops` | Bảng Iceberg của từng tầng, mỗi tầng một bucket: file dữ liệu Parquet (`data/`) và file metadata Iceberg (`metadata/`) |
+| Lakekeeper (database `lakekeeper` trong `postgres-meta`) | Mỗi tầng một warehouse cùng tên với bucket: danh sách namespace, bảng và đường dẫn tới file metadata hiện tại của từng bảng |
 
-Bronze, Silver, Gold, ops là **namespace** trong catalog `lakehouse`, không phải bucket. Trên MinIO, mỗi bảng là một thư mục theo UUID dưới `warehouse/lakehouse/`, không mang tên tầng. Muốn biết bảng nằm ở đâu thì xem trong Lakekeeper UI hoặc truy vấn `SELECT "$path" FROM lakehouse.silver.transactions LIMIT 1` qua Trino. Không xóa hay sửa tay file trong bucket `warehouse`: catalog sẽ trỏ tới file không còn tồn tại.
+Mỗi tầng là một catalog trong Spark và Trino (`bronze`, `silver`, `gold`, `ops`), trỏ tới warehouse cùng tên trong Lakekeeper và bucket cùng tên trên MinIO. Bên trong, bảng nghiệp vụ nằm ở namespace `card`, bảng vận hành ở `ops.pipeline`, nên tên đầy đủ có dạng `<tầng>.<namespace>.<bảng>`, ví dụ `silver.card.transactions`. Trong bucket, mỗi bảng là một thư mục theo UUID; muốn biết bảng nằm ở đâu thì xem Lakekeeper UI hoặc truy vấn `SELECT "$path" FROM silver.card.transactions LIMIT 1` qua Trino. Không xóa hay sửa tay file trong các bucket này: catalog sẽ trỏ tới file không còn tồn tại.
 
 Khi Spark hoặc Trino đọc một bảng: hỏi Lakekeeper đường dẫn file metadata hiện tại → đọc metadata trên MinIO để biết file Parquet nào thuộc snapshot mới nhất → đọc các file Parquet đó. Khi ghi: ghi Parquet và metadata mới lên MinIO, rồi Lakekeeper đổi con trỏ sang metadata mới trong một thao tác nguyên tử.
 
