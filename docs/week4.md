@@ -9,7 +9,7 @@ Demo cuối mốc: 4 bảng Bronze có đủ dữ liệu; chạy lại không b�
 | Trích xuất JDBC: giao dịch theo tháng, customers, cards (token hóa, bỏ CVV) | [spark/extract/extract_jdbc.py](../spark/extract/extract_jdbc.py) |
 | Nạp file landing (mcc_codes) | [spark/extract/load_files.py](../spark/extract/load_files.py) |
 | Hàm thuần: biên tháng, câu SELECT, HMAC | [spark/common/helpers.py](../spark/common/helpers.py) |
-| Session, DDL, đọc JDBC, checksum, ops.ingestion_log | [spark/common/lakehouse.py](../spark/common/lakehouse.py) |
+| Session, DDL, đọc JDBC, checksum, ops.pipeline.ingestion_log | [spark/common/lakehouse.py](../spark/common/lakehouse.py) |
 | Kiểm thử (18 test mới, tổng 23) | [tests/test_bronze_helpers.py](../tests/test_bronze_helpers.py) |
 | Lệnh `bronze-ref`, `bronze`, `bronze-range`, `bronze-status` | [Makefile](../Makefile) |
 
@@ -29,17 +29,17 @@ Batch đã nạp thành công thì bị bỏ qua; thêm `FORCE=1` để nạp l�
 
 | Bảng | Nguồn | Cách ghi | `_batch_id` |
 |---|---|---|---|
-| `bronze.transactions_raw` | `core_card.transactions`, `date` thuộc tháng M | `overwritePartitions()`, partition `identity(_batch_id)` | `2019-03` |
-| `bronze.customers_raw` | `core_card.customers` | `overwrite(true)`: ghi đè toàn bảng | `ref_YYYYMMDD` |
-| `bronze.cards_raw` | `core_card.cards` | Ghi đè toàn bảng | `ref_YYYYMMDD` |
-| `bronze.mcc_codes_raw` | `s3://landing/reference/mcc_codes/mcc_codes.jsonl` | Ghi đè toàn bảng | `ref_YYYYMMDD` |
+| `bronze.card.transactions_raw` | `core_card.transactions`, `date` thuộc tháng M | `overwritePartitions()`, partition `identity(_batch_id)` | `2019-03` |
+| `bronze.card.customers_raw` | `core_card.customers` | `overwrite(true)`: ghi đè toàn bảng | `ref_YYYYMMDD` |
+| `bronze.card.cards_raw` | `core_card.cards` | Ghi đè toàn bảng | `ref_YYYYMMDD` |
+| `bronze.card.mcc_codes_raw` | `s3://landing/reference/mcc_codes/mcc_codes.jsonl` | Ghi đè toàn bảng | `ref_YYYYMMDD` |
 
 Mỗi batch chạy qua `run_batch`:
-1. Đọc `ops.ingestion_log`. Nếu lần nạp gần nhất của `(source, batch)` là SUCCESS và không có `--force` thì bỏ qua.
+1. Đọc `ops.pipeline.ingestion_log`. Nếu lần nạp gần nhất của `(source, batch)` là SUCCESS và không có `--force` thì bỏ qua.
 2. Đếm số dòng ở nguồn với cùng điều kiện lọc. Tháng không có dữ liệu thì báo lỗi.
 3. Đọc qua JDBC, ép mọi cột sang `::text` ngay trong câu SQL, thêm `_ingested_at`, `_source`, `_batch_id`, rồi ghi.
 4. Đọc lại phần vừa ghi để lấy số dòng và checksum, sau đó so với số dòng ở nguồn (**R10**). Nếu lệch, ghi FAILED và job thoát với mã lỗi.
-5. Ghi một dòng vào `ops.ingestion_log`: run_id, source, batch_id, source_count, row_count, checksum, status, message, started_at, finished_at. Bước này chạy cả khi job lỗi.
+5. Ghi một dòng vào `ops.pipeline.ingestion_log`: run_id, source, batch_id, source_count, row_count, checksum, status, message, started_at, finished_at. Bước này chạy cả khi job lỗi.
 
 **Bảo vệ số thẻ.** Câu SELECT bảng `cards` không có cột `cvv`, nên CVV không ra khỏi Postgres. `card_number` đi qua một Python UDF, trả về `card_token = hex(HMAC-SHA256(HMAC_SECRET, PAN))`, `card_bin` và `card_last4`. Cột PAN bị loại trước khi ghi. Job cũng `assert` rằng DataFrame ghi xuống không còn `card_number` hay `cvv`. Khóa HMAC chỉ nằm trong biến môi trường của container, không bao giờ được gửi tới nguồn.
 
@@ -56,11 +56,11 @@ Mỗi batch chạy qua `run_batch`:
 | Chạy lại toàn bộ 118 tháng | `Đã nạp 0/118 tháng`, 22 giây |
 | Đối soát độc lập: đếm theo tháng ở Postgres so với đếm theo `_batch_id` qua Trino | 118/118 tháng khớp; 13.305.915 dòng; 0 id trùng; 0 dòng có `date` ngoài tháng của batch |
 | Tổng amount theo năm ở Bronze | Khớp báo cáo profiling cả 10 năm (VD 2019: $49.475.055,31) |
-| `bronze.cards_raw` | Không có cột `card_number` hay `cvv` |
+| `bronze.card.cards_raw` | Không có cột `card_number` hay `cvv` |
 | Tính lại HMAC từ PAN ở nguồn cho cả 6.146 thẻ | 6.146/6.146 token, BIN, last4 khớp; 0 dòng chứa PAN đầy đủ |
 | Tháng sai định dạng (`MONTH=2019-3`) | Bị chặn ở bước kiểm tra tham số, không khởi động Spark |
 | Tháng không có dữ liệu (`MONTH=2009-12`) | Ghi FAILED vào ingestion_log kèm thông báo lỗi, `make` thoát với mã lỗi |
-| Dung lượng | transactions_raw 220,5 MB, 118 file Parquet (1 file mỗi tháng); cards_raw 0,4 MB. Tất cả nằm trong bucket `warehouse` |
+| Dung lượng | transactions_raw 220,5 MB, 118 file Parquet (1 file mỗi tháng); cards_raw 0,4 MB. Tất cả nằm trong bucket `bronze` |
 
 ## Quyết định thiết kế
 
@@ -76,5 +76,5 @@ Mỗi batch chạy qua `run_batch`:
 - **Nếu R10 lệch, dữ liệu vẫn đã được commit vào Bronze**, chỉ ingestion_log mang trạng thái FAILED. Tuần 5 đã chặn việc này ở Silver: `require_bronze` chỉ cho dựng Silver khi lần nạp gần nhất là SUCCESS. Tuần 6: DAG dừng khi task Bronze thất bại.
 - Trino giới hạn bộ nhớ khoảng 500 MB mỗi node. `count(DISTINCT id)` trên 13 triệu chuỗi, nhóm theo tháng, bị vượt giới hạn; ép `id` sang số nguyên và đếm toàn bảng thì chạy được.
 - Có 244 ô trong `card_token` chứa chuỗi 13–19 chữ số liền nhau. Đây là trùng hợp ngẫu nhiên trong chuỗi hex, không phải PAN. Vì vậy R13 (tuần 8) phải so HMAC của chuỗi tìm được với token, không chỉ dùng regex (đúng như R13 trong Design Doc).
-- Mỗi batch thêm một snapshot cho bảng giao dịch và một cho `ops.ingestion_log`. dag_maintenance (tuần 8) sẽ chạy `expire_snapshots` và `rewrite_manifests`.
+- Mỗi batch thêm một snapshot cho bảng giao dịch và một cho `ops.pipeline.ingestion_log`. dag_maintenance (tuần 8) sẽ chạy `expire_snapshots` và `rewrite_manifests`.
 - `_batch_id` của tham chiếu theo ngày UTC. Nạp lại tham chiếu trong cùng ngày thì phải thêm `FORCE=1`.

@@ -4,11 +4,11 @@
     python silver_transactions.py --from 2010-01 --to 2019-10
 
 Với mỗi tháng M:
-1. Chỉ đọc bronze.transactions_raw của M nếu lần nạp Bronze gần nhất của M là SUCCESS.
-2. Tách bản ghi vi phạm rule BLOCK (R01–R03) vào ops.quarantine_transactions (ghi đè phần của M).
-3. MERGE INTO silver.transactions trong phạm vi tháng M, chỉ ghi các dòng thay đổi.
+1. Chỉ đọc bronze.card.transactions_raw của M nếu lần nạp Bronze gần nhất của M là SUCCESS.
+2. Tách bản ghi vi phạm rule BLOCK (R01–R03) vào ops.pipeline.quarantine_transactions (ghi đè phần của M).
+3. MERGE INTO silver.card.transactions trong phạm vi tháng M, chỉ ghi các dòng thay đổi.
 4. Đối soát R10 vế 2: số dòng Bronze M = Silver M + quarantine M; lệch thì báo lỗi.
-Sau các tháng, tính lại silver.merchants trong cùng session (bỏ qua bằng --skip-merchants).
+Sau các tháng, tính lại silver.card.merchants trong cùng session (bỏ qua bằng --skip-merchants).
 """
 
 import argparse
@@ -23,8 +23,8 @@ from common import lakehouse as lh
 from transform import silver_merchants
 from transform import silver_transforms as st
 
-SILVER = "lakehouse.silver.transactions"
-QUARANTINE = "lakehouse.ops.quarantine_transactions"
+SILVER = "silver.card.transactions"
+QUARANTINE = "ops.pipeline.quarantine_transactions"
 
 SILVER_DDL = """
     transaction_id BIGINT, transaction_ts TIMESTAMP_NTZ, customer_id INT, card_id INT,
@@ -83,7 +83,7 @@ def process_month(spark, rid, month, statuses):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     h.add_month_args(ap)
-    ap.add_argument("--skip-merchants", action="store_true", help="không tính lại silver.merchants")
+    ap.add_argument("--skip-merchants", action="store_true", help="không tính lại silver.card.merchants")
     args = ap.parse_args()
     try:
         months = h.resolve_months(args)

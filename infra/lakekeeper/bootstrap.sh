@@ -1,5 +1,6 @@
 #!/bin/sh
-# Khởi tạo Lakekeeper (một lần) và tạo warehouse "lakehouse" trên bucket warehouse của MinIO.
+# Khởi tạo Lakekeeper (một lần) và tạo mỗi tầng một warehouse trên bucket MinIO cùng tên:
+# warehouse bronze → s3://bronze, silver → s3://silver, gold → s3://gold, ops → s3://ops.
 # Chạy lại an toàn: đã bootstrap / warehouse đã tồn tại thì bỏ qua.
 set -eu
 API=http://lakekeeper:8181/management/v1
@@ -11,18 +12,18 @@ case "$code" in
   *) grep -qi 'already' /tmp/out && echo "Đã bootstrap trước đó" || { echo "Bootstrap lỗi $code"; cat /tmp/out; exit 1; } ;;
 esac
 
-if curl -sf "$API/warehouse" | grep -q "\"name\":\"${WAREHOUSE_NAME}\""; then
-  echo "Warehouse ${WAREHOUSE_NAME} đã tồn tại"
-  exit 0
-fi
-
-cat > /tmp/warehouse.json <<JSON
+existing=$(curl -sf "$API/warehouse")
+for wh in ${WAREHOUSES}; do
+  if echo "$existing" | grep -q "\"name\":\"${wh}\""; then
+    echo "Warehouse ${wh} đã tồn tại"
+    continue
+  fi
+  cat > /tmp/warehouse.json <<JSON
 {
-  "warehouse-name": "${WAREHOUSE_NAME}",
+  "warehouse-name": "${wh}",
   "storage-profile": {
     "type": "s3",
-    "bucket": "warehouse",
-    "key-prefix": "${WAREHOUSE_NAME}",
+    "bucket": "${wh}",
     "endpoint": "http://minio:9000",
     "region": "us-east-1",
     "path-style-access": true,
@@ -37,9 +38,10 @@ cat > /tmp/warehouse.json <<JSON
   }
 }
 JSON
-code=$(curl -s -o /tmp/out -w '%{http_code}' -X POST "$API/warehouse" \
-  -H 'Content-Type: application/json' --data @/tmp/warehouse.json)
-case "$code" in
-  2*) echo "Đã tạo warehouse ${WAREHOUSE_NAME}" ;;
-  *) echo "Tạo warehouse lỗi $code"; cat /tmp/out; exit 1 ;;
-esac
+  code=$(curl -s -o /tmp/out -w '%{http_code}' -X POST "$API/warehouse" \
+    -H 'Content-Type: application/json' --data @/tmp/warehouse.json)
+  case "$code" in
+    2*) echo "Đã tạo warehouse ${wh} → s3://${wh}" ;;
+    *) echo "Tạo warehouse ${wh} lỗi $code"; cat /tmp/out; exit 1 ;;
+  esac
+done

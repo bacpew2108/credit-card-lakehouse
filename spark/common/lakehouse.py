@@ -1,4 +1,4 @@
-"""Phần dùng Spark chung: session, DDL, đọc JDBC, checksum, ops.ingestion_log, MERGE cho Silver."""
+"""Phần dùng Spark chung: session, DDL, đọc JDBC, checksum, ops.pipeline.ingestion_log, MERGE cho Silver."""
 
 import os
 import time
@@ -10,7 +10,9 @@ from operator import and_
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-LOG_TABLE = "lakehouse.ops.ingestion_log"
+# Mỗi tầng là một catalog (warehouse Lakekeeper và bucket MinIO riêng), bên trong là namespace
+NAMESPACES = ("bronze.card", "silver.card", "gold.card", "ops.pipeline")
+LOG_TABLE = "ops.pipeline.ingestion_log"
 LOG_COLS = """
     run_id STRING, source STRING, batch_id STRING,
     source_count BIGINT, row_count BIGINT, checksum STRING,
@@ -20,8 +22,8 @@ LOG_COLS = """
 
 def get_spark(app):
     spark = SparkSession.builder.appName(app).getOrCreate()
-    for ns in ("bronze", "silver", "ops"):
-        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS lakehouse.{ns}")
+    for ns in NAMESPACES:
+        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {ns}")
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {LOG_TABLE} ({LOG_COLS}
         ) USING iceberg
@@ -103,7 +105,7 @@ def run_id():
 
 
 def latest_status(spark, source):
-    """{batch_id: trạng thái lần nạp gần nhất} của một nguồn trong ops.ingestion_log."""
+    """{batch_id: trạng thái lần nạp gần nhất} của một nguồn trong ops.pipeline.ingestion_log."""
     rows = spark.sql(f"""
         SELECT batch_id, max_by(status, finished_at) AS status
         FROM {LOG_TABLE} WHERE source = '{source}' GROUP BY batch_id
@@ -186,7 +188,7 @@ def merge_changes(spark, src, table, key, cols, scope=None):
 
 
 def run_batch(spark, rid, source, batch_id, load, done=frozenset(), force=False):
-    """Nạp một batch có ghi ops.ingestion_log.
+    """Nạp một batch có ghi ops.pipeline.ingestion_log.
 
     load() ghi dữ liệu và trả về (source_count, row_count, checksum). Batch đã SUCCESS thì bỏ
     qua, trừ khi force. Lệch số dòng nguồn/Bronze (R10) thì ghi FAILED và báo lỗi.

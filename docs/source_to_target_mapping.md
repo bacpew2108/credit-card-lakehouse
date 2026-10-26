@@ -2,7 +2,7 @@
 
 Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi ra sao, và rule DQ nào kiểm tra nó. Kiểu dữ liệu chi tiết nằm trong [data_model.md](data_model.md). Ký hiệu **✗** nghĩa là cột dừng lại ở tầng đó, không đi tiếp.
 
-## core_card.customers → bronze.customers_raw → silver.customers → gold.dim_customer
+## core_card.customers → bronze.card.customers_raw → silver.card.customers → gold.card.dim_customer
 
 | Nguồn | Bronze | Silver | Gold | Biến đổi | Rule |
 |---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | num_credit_cards | num_credit_cards | num_credit_cards | num_credit_cards | | R09 (so với số thẻ thực tế) |
 | updated_at | ✗ | – | – | Cột kỹ thuật của nguồn, thay bằng `_ingested_at` | |
 
-## core_card.cards → bronze.cards_raw → silver.cards → gold.dim_card
+## core_card.cards → bronze.card.cards_raw → silver.card.cards → gold.card.dim_card
 
 | Nguồn | Bronze | Silver | Gold | Biến đổi | Rule |
 |---|---|---|---|---|---|
@@ -39,7 +39,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | acct_open_date | acct_open_date | acct_open_date | acct_open_date | `MM/YYYY` → ngày đầu tháng | R14 |
 | year_pin_last_changed | year_pin_last_changed | smallint | smallint | | |
 
-## core_card.transactions → bronze.transactions_raw → silver.transactions → gold.fact_transaction
+## core_card.transactions → bronze.card.transactions_raw → silver.card.transactions → gold.card.fact_transaction
 
 | Nguồn | Bronze | Silver | Gold (fact) | Biến đổi | Rule |
 |---|---|---|---|---|---|
@@ -49,7 +49,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | card_id | card_id | card_id | card_key | Tra dim_card, không khớp thì gán −1 | R04, R08, R14 |
 | amount | amount | amount, is_refund | amount, txn_profile_key (is_refund) | `'$-77.00'` → decimal; < 0 là hoàn tiền | **R02** (BLOCK), R11, R12 |
 | use_chip | use_chip | channel, is_online | txn_profile_key (channel) | `Swipe Transaction` → `Swipe`, … | R07, R08 |
-| merchant_id | merchant_id | merchant_id | merchant_key | → silver.merchants → dim_merchant | |
+| merchant_id | merchant_id | merchant_id | merchant_key | → silver.card.merchants → dim_merchant | |
 | merchant_city | merchant_city | merchant_city | (qua dim_merchant) | `ONLINE` với giao dịch trực tuyến | R07 |
 | merchant_state | merchant_state | merchant_state, is_foreign | (qua dim_merchant) | Không phải mã bang thì là nước ngoài | |
 | zip | zip | zip | (qua dim_merchant) | `'2840.0'` → `'02840'` | |
@@ -59,7 +59,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | created_at | ✗ | – | – | Cột kỹ thuật của nguồn | |
 | (count(*) ở nguồn của tháng M) | – | – | – | So với số dòng Bronze | **R10** (BLOCK) |
 
-## landing/reference/mcc_codes → bronze.mcc_codes_raw → silver.mcc_codes → gold.dim_mcc
+## landing/reference/mcc_codes → bronze.card.mcc_codes_raw → silver.card.mcc_codes → gold.card.dim_mcc
 
 | Nguồn (JSON Lines) | Bronze | Silver | Gold | Biến đổi |
 |---|---|---|---|---|
@@ -73,8 +73,8 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 
 | Bảng | Suy ra từ | Cách dựng |
 |---|---|---|
-| silver.merchants → dim_merchant | silver.transactions | Theo từng merchant_id, lấy vị trí (city, state, zip) xuất hiện nhiều nhất; hòa thì lấy vị trí gần nhất, rồi theo thứ tự chữ cái |
-| dim_txn_profile | silver.transactions | DISTINCT (channel, error_combo, has_error, is_refund) |
+| silver.card.merchants → dim_merchant | silver.card.transactions | Theo từng merchant_id, lấy vị trí (city, state, zip) xuất hiện nhiều nhất; hòa thì lấy vị trí gần nhất, rồi theo thứ tự chữ cái |
+| dim_txn_profile | silver.card.transactions | DISTINCT (channel, error_combo, has_error, is_refund) |
 | dim_date | Lịch | Sinh từ 2010-01-01 đến 2019-12-31 |
 | mart_* | fact + dimension | Xem data_model.md mục 3 |
 
@@ -83,10 +83,10 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | Rule | Chạy ở | Dữ liệu kiểm tra |
 |---|---|---|
 | R10 | Bronze (sau extract) và Silver | Số dòng tháng M ở nguồn = bronze; bronze = silver + quarantine |
-| R01–R03 | Silver | Bản ghi vi phạm đưa vào ops.quarantine_transactions |
-| R04–R09, R12, R14 | Silver | Ghi vào ops.dq_results; WARN thành BLOCK khi tỷ lệ vi phạm > 1% |
+| R01–R03 | Silver | Bản ghi vi phạm đưa vào ops.pipeline.quarantine_transactions |
+| R04–R09, R12, R14 | Silver | Ghi vào ops.pipeline.dq_results; WARN thành BLOCK khi tỷ lệ vi phạm > 1% |
 | R11 | Gold | silver = fact theo số dòng và tổng amount của tháng |
-| R13 | dag_maintenance | Quét toàn bộ bucket warehouse tìm số thẻ đầy đủ |
+| R13 | dag_maintenance | Quét toàn bộ bucket bronze, silver, gold, ops tìm số thẻ đầy đủ |
 
 ## Kiểm chứng rule
 

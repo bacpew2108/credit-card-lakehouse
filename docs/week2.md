@@ -6,19 +6,19 @@ Demo cuối mốc: `make up` khởi động đủ dịch vụ, có healthcheck; 
 
 | Dịch vụ | Image / phiên bản | Vai trò | Cổng host |
 |---|---|---|---|
-| minio, minio-init | MinIO RELEASE.2025-09-07 | Bucket `landing`, `warehouse`; tài khoản dịch vụ `lakehouse-svc` (không dùng root) | 9000, 9001 |
+| minio, minio-init | MinIO RELEASE.2025-09-07 | Bucket `landing`, `bronze`, `silver`, `gold`, `ops`; tài khoản dịch vụ `lakehouse-svc` (không dùng root) | 9000, 9001 |
 | postgres-meta | postgres:16-alpine | 1 instance, 3 database: `lakekeeper`, `airflow`, `superset`, mỗi database một user riêng | – |
 | postgres-source | postgres:16-alpine | Hệ thống nguồn `core_card` (schema làm ở tuần 3) | 5434 (`SOURCE_DB_HOST_PORT`) |
-| lakekeeper (+ migrate, bootstrap) | quay.io/lakekeeper/catalog:v0.13.6 | Iceberg REST Catalog; warehouse `lakehouse` → `s3://warehouse/lakehouse/` | 8181 (UI: `/ui`) |
-| trino | trinodb/trino:480 (Iceberg 1.10.1) | Catalog `lakehouse` | 8082 |
+| lakekeeper (+ migrate, bootstrap) | quay.io/lakekeeper/catalog:v0.13.6 | Iceberg REST Catalog; mỗi tầng một warehouse: `bronze` → `s3://bronze`, `silver` → `s3://silver`, `gold` → `s3://gold`, `ops` → `s3://ops` | 8181 (UI: `/ui`) |
+| trino | trinodb/trino:480 (Iceberg 1.10.1) | Catalog `bronze`, `silver`, `gold`, `ops` | 8082 |
 | spark-master, spark-worker, spark-connect | `lakehouse-spark` = Python 3.13 + Java 17 + PySpark 4.0.4 + iceberg-spark-runtime-4.0_2.13:1.10.1 + iceberg-aws-bundle:1.10.1 + PostgreSQL JDBC 42.7.8 | Cụm Spark standalone; `spark-connect` là driver nhận job qua Spark Connect (cổng 15002) | 8090, 8091, 4040 |
 | airflow-apiserver, scheduler, dag-processor | `lakehouse-airflow` = Airflow 3.3.1 + pyspark-client 4.0.4 | Điều phối; task chạy `python job.py` | 8080 |
 | superset, superset-init (profile `bi`) | `lakehouse-superset` = Superset 6.0.0 + psycopg2 + trino | BI | 8088 |
 
 - **Profile:** `make up-core` chạy các dịch vụ không gắn profile, không có Superset. `make up` thêm profile `bi`.
 - **Giới hạn RAM** (`mem_limit`): spark-worker 3 GB, Trino 2 GB, scheduler 2 GB, spark-connect 1,5 GB, các dịch vụ khác 256 MB – 1 GB.
-- **Namespace Iceberg** `bronze`, `silver`, `gold`, `ops` được tạo bởi `spark/smoke_test.py`. Từ tuần 4, mọi job cũng tự tạo `bronze`, `silver`, `ops` khi khởi động (`get_spark`).
-- **Tầng là namespace, không phải bucket.** Mọi bảng của cả bốn namespace nằm chung bucket `warehouse`, mỗi bảng một thư mục UUID dưới `warehouse/lakehouse/`. Lakekeeper giữ ánh xạ tên bảng → file metadata hiện tại; metadata Iceberg (JSON, Avro) và dữ liệu Parquet đều nằm trên MinIO. Bucket `landing` chỉ chứa file thô chưa thành bảng.
+- **Namespace Iceberg** `bronze.card`, `silver.card`, `gold.card`, `ops.pipeline` được tạo bởi `spark/smoke_test.py`; mọi job cũng tự tạo khi khởi động (`get_spark`).
+- **Mỗi tầng tách riêng ở cả catalog lẫn lưu trữ.** Spark và Trino có 4 catalog `bronze`, `silver`, `gold`, `ops`, mỗi catalog trỏ tới một warehouse Lakekeeper và một bucket MinIO cùng tên. Trong bucket, mỗi bảng là một thư mục UUID; Lakekeeper giữ ánh xạ tên bảng → file metadata hiện tại, còn metadata Iceberg (JSON, Avro) và dữ liệu Parquet nằm trên MinIO. Bucket `landing` chỉ chứa file thô chưa thành bảng.
 
 
 ## Spark
@@ -41,6 +41,6 @@ Lý do:
 
 - `apache/iceberg-rest-fixture` + JdbcCatalog → **Lakekeeper**, đúng như Design Doc.
 - 3 instance Postgres 13 → `postgres-meta` (Postgres 16, 3 database) + `postgres-source`.
-- Bucket `raw` → `landing`. Catalog Trino `iceberg` → `lakehouse`.
+- Bucket `raw` → `landing`. Catalog Trino `iceberg` → `bronze`, `silver`, `gold`, `ops`.
 - Bỏ mount `/var/run/docker.sock` vào Airflow. Superset có Dockerfile riêng, không còn phụ thuộc image `banking-superset` chỉ có trên một máy.
 - `.env`: `ICEBERG_DB_*` → `LAKEKEEPER_DB_*`; thêm `LAKEKEEPER_ENCRYPTION_KEY`, `META_DB_ADMIN_*`, `SOURCE_DB_HOST_PORT`; mỗi dịch vụ có user database riêng.

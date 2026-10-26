@@ -32,11 +32,12 @@ MCC_COLS = ["mcc", "description"]
 # Bronze giữ mọi cột ở dạng chuỗi: ép ::text ngay trong câu truy vấn nguồn
 CORE_CARD_TEXT_COLS = {"transactions": TXN_COLS, "customers": CUSTOMER_COLS, "cards": CARD_SRC_COLS}
 
-# Bảng Bronze và tên nguồn ghi trong ops.ingestion_log (Silver tra lần nạp theo tên nguồn)
-BRONZE_TXN = "lakehouse.bronze.transactions_raw"
-BRONZE_CUSTOMERS = "lakehouse.bronze.customers_raw"
-BRONZE_CARDS = "lakehouse.bronze.cards_raw"
-BRONZE_MCC = "lakehouse.bronze.mcc_codes_raw"
+# Bảng Bronze (catalog bronze, namespace card) và tên nguồn ghi trong ops.pipeline.ingestion_log
+# (Silver tra lần nạp theo tên nguồn)
+BRONZE_TXN = "bronze.card.transactions_raw"
+BRONZE_CUSTOMERS = "bronze.card.customers_raw"
+BRONZE_CARDS = "bronze.card.cards_raw"
+BRONZE_MCC = "bronze.card.mcc_codes_raw"
 SRC_TXN = "core_card.transactions"
 SRC_CUSTOMERS = "core_card.customers"
 SRC_CARDS = "core_card.cards"

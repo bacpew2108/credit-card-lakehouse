@@ -6,7 +6,7 @@ UV := uv run --no-project --with-requirements requirements-dev.txt
 PY := $(UV) python
 SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
 SPARK := $(COMPOSE) exec -T airflow-scheduler python /opt/airflow/spark
-TRINO := $(COMPOSE) exec -T trino trino --catalog lakehouse --output-format ALIGNED --execute
+TRINO := $(COMPOSE) exec -T trino trino --output-format ALIGNED --execute
 
 
 .DEFAULT_GOAL := help
@@ -60,13 +60,13 @@ profile: ## Profiling dữ liệu gốc → docs/profiling/profiling_report.md
 smoke: ## Kiểm chứng Spark ghi → Trino đọc/ghi → Spark đọc trên cùng bảng Iceberg
 	$(SPARK)/smoke_test.py write
 	$(TRINO) \
-	  "SELECT writer, count(*) AS n FROM ops.smoke_test GROUP BY writer; \
-	   INSERT INTO ops.smoke_test VALUES (4, 'trino', TIMESTAMP '2019-03-04 10:00:00'); \
-	   SELECT * FROM ops.smoke_test ORDER BY id"
+	  "SELECT writer, count(*) AS n FROM ops.pipeline.smoke_test GROUP BY writer; \
+	   INSERT INTO ops.pipeline.smoke_test VALUES (4, 'trino', TIMESTAMP '2019-03-04 10:00:00'); \
+	   SELECT * FROM ops.pipeline.smoke_test ORDER BY id"
 	$(SPARK)/smoke_test.py check
 
-trino: ## Mở Trino CLI trên catalog lakehouse
-	$(COMPOSE) exec trino trino --catalog lakehouse
+trino: ## Mở Trino CLI (catalog bronze, silver, gold, ops)
+	$(COMPOSE) exec trino trino
 
 seed: ## Nạp toàn bộ dữ liệu nguồn vào core_card (FORCE=1 để nạp lại)
 	$(SEED) load $(if $(FORCE),--force)
@@ -91,11 +91,11 @@ bronze-range: ## Trích xuất nhiều tháng: make bronze-range FROM=2010-01 TO
 	$(SPARK)/extract/extract_jdbc.py transactions --from $(FROM) --to $(TO) $(if $(FORCE),--force)
 
 bronze-status: ## Số dòng các bảng Bronze và 10 lần nạp gần nhất
-	$(TRINO) "SELECT 'transactions_raw' AS tbl, count(*) AS n_rows, count(DISTINCT _batch_id) AS n_batches FROM bronze.transactions_raw \
-	  UNION ALL SELECT 'customers_raw', count(*), count(DISTINCT _batch_id) FROM bronze.customers_raw \
-	  UNION ALL SELECT 'cards_raw', count(*), count(DISTINCT _batch_id) FROM bronze.cards_raw \
-	  UNION ALL SELECT 'mcc_codes_raw', count(*), count(DISTINCT _batch_id) FROM bronze.mcc_codes_raw; \
-	  SELECT source, batch_id, source_count, row_count, status, finished_at FROM ops.ingestion_log \
+	$(TRINO) "SELECT 'transactions_raw' AS tbl, count(*) AS n_rows, count(DISTINCT _batch_id) AS n_batches FROM bronze.card.transactions_raw \
+	  UNION ALL SELECT 'customers_raw', count(*), count(DISTINCT _batch_id) FROM bronze.card.customers_raw \
+	  UNION ALL SELECT 'cards_raw', count(*), count(DISTINCT _batch_id) FROM bronze.card.cards_raw \
+	  UNION ALL SELECT 'mcc_codes_raw', count(*), count(DISTINCT _batch_id) FROM bronze.card.mcc_codes_raw; \
+	  SELECT source, batch_id, source_count, row_count, status, finished_at FROM ops.pipeline.ingestion_log \
 	  ORDER BY finished_at DESC LIMIT 10"
 
 silver-ref: ## Bronze → Silver cho customers, cards, mcc_codes
@@ -109,16 +109,16 @@ silver-range: ## Silver nhiều tháng rồi merchants: make silver-range FROM=2
 	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make silver-range FROM=2010-01 TO=2019-10"; exit 1)
 	$(SPARK)/transform/silver_transactions.py --from $(FROM) --to $(TO)
 
-silver-merchants: ## Tính lại silver.merchants từ silver.transactions
+silver-merchants: ## Tính lại silver.card.merchants từ silver.card.transactions
 	$(SPARK)/transform/silver_merchants.py
 
 silver-status: ## Số dòng 5 bảng Silver và số bản ghi bị cách ly theo rule
-	$(TRINO) "SELECT 'transactions' AS tbl, count(*) AS n_rows FROM silver.transactions \
-	  UNION ALL SELECT 'customers', count(*) FROM silver.customers \
-	  UNION ALL SELECT 'cards', count(*) FROM silver.cards \
-	  UNION ALL SELECT 'mcc_codes', count(*) FROM silver.mcc_codes \
-	  UNION ALL SELECT 'merchants', count(*) FROM silver.merchants; \
-	  SELECT rule_id, count(*) AS n, count(DISTINCT _batch_id) AS n_batches FROM ops.quarantine_transactions GROUP BY rule_id"
+	$(TRINO) "SELECT 'transactions' AS tbl, count(*) AS n_rows FROM silver.card.transactions \
+	  UNION ALL SELECT 'customers', count(*) FROM silver.card.customers \
+	  UNION ALL SELECT 'cards', count(*) FROM silver.card.cards \
+	  UNION ALL SELECT 'mcc_codes', count(*) FROM silver.card.mcc_codes \
+	  UNION ALL SELECT 'merchants', count(*) FROM silver.card.merchants; \
+	  SELECT rule_id, count(*) AS n, count(DISTINCT _batch_id) AS n_batches FROM ops.pipeline.quarantine_transactions GROUP BY rule_id"
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1

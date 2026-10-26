@@ -9,13 +9,14 @@ import time
 
 from pyspark.sql import SparkSession
 
-NAMESPACES = ["bronze", "silver", "gold", "ops"]
-TABLE = "lakehouse.ops.smoke_test"
+from common.lakehouse import NAMESPACES
+
+TABLE = "ops.pipeline.smoke_test"
 
 
 def write(spark):
     for ns in NAMESPACES:
-        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS lakehouse.{ns}")
+        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {ns}")
     # DROP + CREATE thay vì CREATE OR REPLACE: với Lakekeeper, REPLACE chỉ có DDL
     # không xóa dữ liệu cũ (xem docs/week2.md)
     spark.sql(f"DROP TABLE IF EXISTS {TABLE}")
