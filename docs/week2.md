@@ -6,7 +6,7 @@ Demo cuối mốc: `make up` khởi động đủ dịch vụ, có healthcheck; 
 
 | Dịch vụ | Image / phiên bản | Vai trò | Cổng host |
 |---|---|---|---|
-| minio, minio-init | MinIO RELEASE.2025-09-07 | Bucket `landing`, `bronze`, `silver`, `gold`, `ops`; tài khoản dịch vụ `lakehouse-svc` (không dùng root) | 9000, 9001 |
+| minio, minio-init | MinIO RELEASE.2025-09-07 | Bucket `landing`, `bronze`, `silver`, `gold`, `ops`; mỗi dịch vụ một tài khoản chỉ có quyền trên bucket nó cần (README, mục Bảo mật) | 9000, 9001 |
 | postgres-meta | postgres:16-alpine | 1 instance, 3 database: `lakekeeper`, `airflow`, `superset`, mỗi database một user riêng | – |
 | postgres-source | postgres:16-alpine | Hệ thống nguồn `core_card` (schema làm ở tuần 3) | 5434 (`SOURCE_DB_HOST_PORT`) |
 | lakekeeper (+ migrate, bootstrap) | quay.io/lakekeeper/catalog:v0.13.6 | Iceberg REST Catalog; mỗi tầng một warehouse: `bronze` → `s3://bronze`, `silver` → `s3://silver`, `gold` → `s3://gold`, `ops` → `s3://ops` | 8181 (UI: `/ui`) |

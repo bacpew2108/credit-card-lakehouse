@@ -10,7 +10,7 @@ TRINO := $(COMPOSE) exec -T trino trino --output-format ALIGNED --execute
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status demo erase test
+.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status storage-status demo erase test
 
 help: ## Liệt kê các lệnh
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
@@ -25,7 +25,8 @@ secrets: ## In các khóa ngẫu nhiên để dán vào .env
 	@echo "SUPERSET_SECRET_KEY=$$(openssl rand -base64 42)"
 	@echo "HMAC_SECRET=$$(openssl rand -hex 32)"
 	@echo "LAKEKEEPER_ENCRYPTION_KEY=$$(openssl rand -hex 32)"
-	@echo "MINIO_SECRET_KEY=$$(openssl rand -hex 20)"
+	@for v in LAKEKEEPER_BRONZE LAKEKEEPER_SILVER LAKEKEEPER_GOLD LAKEKEEPER_OPS TRINO LANDING_WRITER LANDING_READER; do \
+	  echo "MINIO_SECRET_$$v=$$(openssl rand -hex 20)"; done
 	@for v in MINIO_ROOT_PASSWORD META_DB_ADMIN_PASSWORD LAKEKEEPER_DB_PASSWORD AIRFLOW_DB_PASSWORD \
 	  SUPERSET_DB_PASSWORD SOURCE_DB_PASSWORD AIRFLOW_ADMIN_PASSWORD SUPERSET_ADMIN_PASSWORD; do \
 	  echo "$$v=$$(openssl rand -hex 12)"; done
@@ -119,6 +120,13 @@ silver-status: ## Số dòng 5 bảng Silver và số bản ghi bị cách ly th
 	  UNION ALL SELECT 'mcc_codes', count(*) FROM silver.card.mcc_codes \
 	  UNION ALL SELECT 'merchants', count(*) FROM silver.card.merchants; \
 	  SELECT rule_id, count(*) AS n, count(DISTINCT _batch_id) AS n_batches FROM ops.pipeline.quarantine_transactions GROUP BY rule_id"
+
+storage-status: ## Dung lượng từng tầng: vật lý (mc du) và dữ liệu đang dùng (snapshot hiện tại)
+	@echo "Dung lượng vật lý của bucket (gồm snapshot cũ, file mồ côi, metadata):"
+	@$(COMPOSE) exec -T minio sh -c 'mc alias set l http://localhost:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null; \
+	  for b in bronze silver gold ops; do mc du l/$$b; done'
+	@echo "Dữ liệu đang dùng (file của snapshot hiện tại):"
+	@$(SPARK)/maintenance/storage_report.py
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1

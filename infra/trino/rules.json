@@ -1,0 +1,8 @@
+{
+  "catalogs": [
+    {"user": "superset", "catalog": "(gold|ops)", "allow": "read-only"},
+    {"user": "superset", "catalog": "system", "allow": "read-only"},
+    {"user": "superset", "catalog": ".*", "allow": "none"},
+    {"catalog": ".*", "allow": "all"}
+  ]
+}
