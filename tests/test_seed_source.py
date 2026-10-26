@@ -1,13 +1,10 @@
 """Kiểm thử các hàm thuần của generators/seed_source.py (không cần PostgreSQL, MinIO)."""
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "generators"))
-import seed_source as ss  # noqa: E402
+import seed_source as ss
 
 DATA = ss.DEFAULT_DATA_DIR
 

@@ -2,9 +2,10 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 DATA_DIR ?= data/raw
-PY := uv run --no-project --with-requirements requirements-dev.txt python
+UV := uv run --no-project --with-requirements requirements-dev.txt
+PY := $(UV) python
 SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
-SPARK := $(COMPOSE) exec -T airflow-scheduler spark-submit /opt/airflow/spark
+SPARK := $(COMPOSE) exec -T airflow-scheduler python /opt/airflow/spark
 TRINO := $(COMPOSE) exec -T trino trino --catalog lakehouse --output-format ALIGNED --execute
 
 
@@ -57,12 +58,12 @@ profile: ## Profiling dữ liệu gốc → docs/profiling/profiling_report.md
 	$(PY) docs/profiling/profile_dataset.py --data-dir "$(DATA_DIR)" --out docs/profiling/profiling_report.md
 
 smoke: ## Kiểm chứng Spark ghi → Trino đọc/ghi → Spark đọc trên cùng bảng Iceberg
-	$(COMPOSE) exec -T airflow-scheduler spark-submit /opt/airflow/spark/smoke_test.py write
-	$(COMPOSE) exec -T trino trino --catalog lakehouse --output-format ALIGNED --execute \
+	$(SPARK)/smoke_test.py write
+	$(TRINO) \
 	  "SELECT writer, count(*) AS n FROM ops.smoke_test GROUP BY writer; \
 	   INSERT INTO ops.smoke_test VALUES (4, 'trino', TIMESTAMP '2019-03-04 10:00:00'); \
 	   SELECT * FROM ops.smoke_test ORDER BY id"
-	$(COMPOSE) exec -T airflow-scheduler spark-submit /opt/airflow/spark/smoke_test.py check
+	$(SPARK)/smoke_test.py check
 
 trino: ## Mở Trino CLI trên catalog lakehouse
 	$(COMPOSE) exec trino trino --catalog lakehouse
@@ -126,4 +127,4 @@ erase: ## (Tuần 10) Quyền xóa dữ liệu: make erase CUSTOMER_ID=…
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
 
 test: ## Chạy pytest (có Spark local cho hàm biến đổi Silver; cần Java 17)
-	uv run --no-project --with-requirements requirements-dev.txt --with pyspark==4.0.4 python -m pytest -q tests
+	$(UV) --with pyspark==4.0.4 python -m pytest -q

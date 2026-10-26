@@ -41,7 +41,7 @@ make silver-range FROM=2010-01 TO=2019-10     # giao dịch → Silver (MERGE th
 make silver-status
 ```
 
-Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
+Lần đầu `make up` phải build image Spark (tải PySpark ~430 MB) và image Airflow, mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
 
 | Dịch vụ | URL |
 |---|---|
@@ -49,6 +49,8 @@ Lần đầu `make up` phải build image Airflow (tải PySpark ~430 MB), mất
 | Lakekeeper (Iceberg REST Catalog) | http://localhost:8181/ui |
 | Trino | http://localhost:8082 (`make trino` để mở CLI) |
 | Airflow | http://localhost:8080 |
+| Spark master / worker | http://localhost:8090 / http://localhost:8091 |
+| Spark UI (driver `spark-connect`) | http://localhost:4040 |
 | Superset | http://localhost:8088 |
 
 Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ được hiện thực dần theo kế hoạch.
@@ -62,7 +64,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | Object storage | MinIO `RELEASE.2025-09-07T16-13-09Z` | Đang dùng |
 | Trino | 480 (Iceberg connector, native S3) | Đang dùng |
 | Apache Spark | PySpark 4.0.4 (Scala 2.13), OpenJDK 17, `iceberg-spark-runtime-4.0_2.13:1.10.1`, `iceberg-aws-bundle:1.10.1`, PostgreSQL JDBC 42.7.8 | Kiểm chứng tuần 2 (`make smoke`) |
-| Apache Airflow | 3.3.1, LocalExecutor, image `lakehouse-airflow` có Java + PySpark | Đang dùng |
+| Apache Airflow | 3.3.1, LocalExecutor, image `lakehouse-airflow` có `pyspark-client` 4.0.4; task chạy `python job.py` | Đang dùng |
+| Cụm Spark | `spark-master`, `spark-worker` (4 nhân, 2 GB), `spark-connect` (driver thường trực, cổng 15002); image `lakehouse-spark` = Python 3.13 + Java 17 + PySpark và các jar ở trên | Đang dùng |
 | Apache Superset | 6.0.0 + `trino` 0.340.0 + `psycopg2-binary` 2.9.13 | Đang dùng |
 | PostgreSQL | 16 (`postgres-meta`: 3 database; `postgres-source`: core_card) | Đang dùng |
 | Python host | 3.13, DuckDB 1.5.6, psycopg 3.3.5, minio 7.2.20 | Profiling, seed nguồn, test |

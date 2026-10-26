@@ -1,13 +1,13 @@
 """Suy ra silver.merchants từ silver.transactions (mục 5.3 Design Doc).
 
-    spark-submit silver_merchants.py
+    python silver_merchants.py
 
 Tính lại trên toàn bộ giao dịch rồi MERGE theo merchant_id, chỉ ghi merchant có thay đổi.
 Mỗi merchant lấy vị trí (city, state, zip) có nhiều giao dịch nhất; location_count > 1 là
 merchant nhiều vị trí (ghi vào DQ ở tuần 6).
 
-silver_transactions.py gọi run() ở cuối, trong cùng Spark session: phép tính chỉ mất vài giây
-khi JVM đã khởi động, còn một lần spark-submit riêng tốn 45–60 giây (khởi động, đọc lạnh).
+silver_transactions.py gọi run() ở cuối, trong cùng Spark session, để mỗi lần dựng Silver
+giao dịch thì merchants cũng được cập nhật (bỏ qua bằng --skip-merchants).
 """
 
 import sys

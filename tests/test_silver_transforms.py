@@ -5,7 +5,6 @@ Chạy Spark local trên máy host (cần Java 17 và pyspark; make test đã th
 
 import csv
 import json
-import sys
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -16,12 +15,11 @@ pytest.importorskip("pyspark")
 from pyspark.sql import SparkSession  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "spark"))
 from common import helpers as h  # noqa: E402
 from transform import silver_transforms as st  # noqa: E402
+from transform.silver_reference import MCC_GROUPS  # noqa: E402
 
-MCC_GROUPS = ROOT / "spark" / "transform" / "ref" / "mcc_groups.csv"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
