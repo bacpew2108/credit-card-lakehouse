@@ -17,6 +17,8 @@ Mỗi tầng là một catalog trong Spark và Trino (`bronze`, `silver`, `gold`
 
 Khi Spark hoặc Trino đọc một bảng: hỏi Lakekeeper đường dẫn file metadata hiện tại → đọc metadata trên MinIO để biết file Parquet nào thuộc snapshot mới nhất → đọc các file Parquet đó. Khi ghi: ghi Parquet và metadata mới lên MinIO, rồi Lakekeeper đổi con trỏ sang metadata mới trong một thao tác nguyên tử.
 
+`make storage-status` in hai con số cho từng tầng: dung lượng vật lý của bucket (`mc du`, gồm snapshot cũ, file mồ côi và metadata) và dung lượng dữ liệu đang dùng (tổng `file_size_in_bytes` của snapshot hiện tại). Phần chênh lệch là phần `expire_snapshots` và `remove_orphan_files` sẽ dọn.
+
 ## Yêu cầu
 
 - Docker Desktop (Compose v2). Máy nên có ≥ 16 GB RAM, ≥ 4 nhân CPU và ≥ 50 GB đĩa trống. Máy ít RAM thì dùng `make up-core`.
@@ -76,7 +78,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── docker-compose.yml
 ├── Makefile
 ├── .env.example          # mẫu biến môi trường (khóa HMAC, mật khẩu)
-├── infra/                # airflow, spark, trino, lakekeeper, postgres-meta, postgres-source, superset
+├── infra/                # airflow, spark, trino, lakekeeper, minio, postgres-meta, postgres-source, superset
 ├── data/raw/             # bộ dữ liệu Kaggle (không commit)
 ├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
@@ -84,7 +86,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 │   ├── extract/          # extract_jdbc.py, load_files.py
 │   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv); gold_*.py, marts.py (tuần 7)
 │   ├── quality/          # rules.py, reconcile.py, pan_scan.py (tuần 6, 8)
-│   └── maintenance/      # iceberg_maintenance.py, erase_customer.py (tuần 8–10)
+│   └── maintenance/      # storage_report.py; iceberg_maintenance.py, erase_customer.py (tuần 8–10)
 ├── airflow/dags/         # dag_smoke_test; dag_reference, dag_monthly (tuần 6), dag_rebuild, dag_maintenance
 ├── sql/                  # truy vấn Q1–Q10, demo Iceberg (tuần 11)
 ├── tests/                # pytest
@@ -108,5 +110,26 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 6 | Data quality, Airflow (1) | Tiếp theo |
 
 ## Bảo mật
+
+### Ai được truy cập bucket nào
+
+Mỗi tài khoản MinIO chỉ có quyền trên đúng bucket nó cần (tạo bởi [infra/minio/init.sh](infra/minio/init.sh)), nên phân quyền được MinIO cưỡng chế, kể cả khi ai đó dùng khóa S3 đọc thẳng file:
+
+| Tài khoản MinIO | Quyền | Ai dùng |
+|---|---|---|
+| `lakekeeper-bronze`, `-silver`, `-gold`, `-ops` | Đọc/ghi bucket của tầng đó | Credential của warehouse cùng tên trong Lakekeeper |
+| `trino` | Đọc `bronze`, `silver`, `gold`; đọc/ghi `ops` | Trino |
+| `landing-writer` | Đọc/ghi `landing` | `seed_source.py` |
+| `landing-reader` | Đọc `landing` | Job `load_files.py` (boto3) trong Airflow |
+
+- **Spark không giữ khóa S3.** Lakekeeper ký từng request S3 của Spark (remote signing) bằng credential của warehouse, nên một bảng thuộc warehouse `silver` chỉ chạm được bucket `silver`.
+- **Trino:** catalog `bronze`, `silver`, `gold` đặt `iceberg.security=read_only` (ba tầng này do Spark ghi). User `superset` chỉ đọc được catalog `gold` và `ops` ([infra/trino/rules.json](infra/trino/rules.json)); Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
+- **Giới hạn:** Lakekeeper và Trino chưa xác thực người dùng (Lakekeeper chạy chế độ allow-all, user Trino do client tự khai). Vì vậy mọi job Spark có cùng quyền trên cả bốn warehouse: cô lập giữa các tầng được cưỡng chế ở lưu trữ, nhưng chưa cưỡng chế theo từng job (VD job Silver vẫn có thể ghi vào bảng Bronze qua catalog). Muốn cưỡng chế theo job cần bật xác thực OIDC và phân quyền OpenFGA của Lakekeeper.
+
+### Dữ liệu cá nhân trong Bronze
+
+Bronze không bật object lock hay versioning của MinIO. Quyền xóa dữ liệu (`erase_customer`) phải xóa được PII của khách hàng (địa chỉ, năm sinh, thu nhập, tọa độ) ở mọi tầng: object lock sẽ chặn việc xóa, còn versioning chỉ thêm delete marker và giữ lại bản cũ, khiến R13 quét bản hiện hành báo sạch trong khi dữ liệu vẫn còn. Số thẻ thì không gặp vấn đề này vì đã được token hóa trước khi ghi vào Bronze. Nếu cần Bronze bất biến cho audit, hướng phù hợp là crypto-shredding: mã hóa PII bằng khóa riêng của từng khách hàng và xóa bằng cách hủy khóa.
+
+### Khóa bí mật
 
 Không bao giờ commit `.env`. `HMAC_SECRET` dùng để token hóa số thẻ, nên không được đổi sau khi đã nạp dữ liệu: đổi khóa đồng nghĩa với việc mọi `card_token` đều thay đổi.

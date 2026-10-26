@@ -4,12 +4,6 @@ name: lakehouse
 #   make up-core  → docker compose up -d
 #   make up       → docker compose --profile bi up -d
 
-# Tài khoản dịch vụ MinIO cho S3FileIO (Spark) và boto3 (job đọc bucket landing)
-x-s3-env: &s3-env
-  AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-  AWS_REGION: us-east-1
-
 # Client trong Airflow (pyspark-client) và cụm Spark phải cùng Python và PySpark:
 # UDF Python được pickle ở client rồi chạy trên executor
 x-spark-build-args: &spark-build-args
@@ -45,12 +39,15 @@ x-airflow-common:
     AIRFLOW_CONN_CORE_CARD: postgresql://${SOURCE_DB_USER}:${SOURCE_DB_PASSWORD}@postgres-source:5432/${SOURCE_DB_NAME}
     # Job Spark là client Spark Connect: pyspark-client gửi kế hoạch tới driver trong spark-connect
     SPARK_REMOTE: sc://spark-connect:15002
-    <<: *s3-env
+    # boto3 trong job load_files đọc bucket landing bằng tài khoản chỉ đọc landing-reader
+    AWS_ACCESS_KEY_ID: landing-reader
+    AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_LANDING_READER}
+    AWS_REGION: us-east-1
     SOURCE_JDBC_URL: jdbc:postgresql://postgres-source:5432/${SOURCE_DB_NAME}
     SOURCE_DB_USER: ${SOURCE_DB_USER}
     SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
     HMAC_SECRET: ${HMAC_SECRET}
-    # Job Spark import module dùng chung trong spark/common; boto3 đọc bucket landing
+    # Job Spark import module dùng chung trong spark/common
     PYTHONPATH: /opt/airflow/spark
     S3_ENDPOINT: http://minio:9000
   volumes:
@@ -98,20 +95,19 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    entrypoint: ["/bin/sh", "/init.sh"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-    entrypoint: >
-      /bin/sh -c "
-      set -e;
-      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
-      for b in landing bronze silver gold ops; do mc mb --ignore-existing local/$$b; done;
-      mc admin user add local $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY;
-      mc admin policy attach local readwrite --user $$MINIO_ACCESS_KEY || true;
-      echo 'MinIO ready: landing, bronze, silver, gold, ops; user' $$MINIO_ACCESS_KEY
-      "
+      MINIO_SECRET_LAKEKEEPER_BRONZE: ${MINIO_SECRET_LAKEKEEPER_BRONZE}
+      MINIO_SECRET_LAKEKEEPER_SILVER: ${MINIO_SECRET_LAKEKEEPER_SILVER}
+      MINIO_SECRET_LAKEKEEPER_GOLD: ${MINIO_SECRET_LAKEKEEPER_GOLD}
+      MINIO_SECRET_LAKEKEEPER_OPS: ${MINIO_SECRET_LAKEKEEPER_OPS}
+      MINIO_SECRET_TRINO: ${MINIO_SECRET_TRINO}
+      MINIO_SECRET_LANDING_WRITER: ${MINIO_SECRET_LANDING_WRITER}
+      MINIO_SECRET_LANDING_READER: ${MINIO_SECRET_LANDING_READER}
+    volumes:
+      - ./infra/minio/init.sh:/init.sh:ro
     restart: "no"
     networks:
       - lakehouse
@@ -216,8 +212,10 @@ services:
     entrypoint: ["/bin/sh", "/bootstrap.sh"]
     environment:
       WAREHOUSES: bronze silver gold ops   # mỗi tầng một warehouse, trên bucket cùng tên
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECRET_LAKEKEEPER_BRONZE: ${MINIO_SECRET_LAKEKEEPER_BRONZE}
+      MINIO_SECRET_LAKEKEEPER_SILVER: ${MINIO_SECRET_LAKEKEEPER_SILVER}
+      MINIO_SECRET_LAKEKEEPER_GOLD: ${MINIO_SECRET_LAKEKEEPER_GOLD}
+      MINIO_SECRET_LAKEKEEPER_OPS: ${MINIO_SECRET_LAKEKEEPER_OPS}
     volumes:
       - ./infra/lakekeeper/bootstrap.sh:/bootstrap.sh:ro
     depends_on:
@@ -234,10 +232,11 @@ services:
     ports:
       - "8082:8080"
     environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECRET_TRINO: ${MINIO_SECRET_TRINO}
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/access-control.properties:/etc/trino/access-control.properties:ro
+      - ./infra/trino/rules.json:/etc/trino/rules.json:ro
     healthcheck:
       test: ["CMD", "/usr/lib/trino/bin/health-check"]
       interval: 10s
@@ -278,7 +277,6 @@ services:
     container_name: spark-worker
     command: ["spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     environment:
-      <<: *s3-env   # executor ghi Iceberg lên MinIO bằng S3FileIO
       SPARK_DAEMON_MEMORY: 256m
       SPARK_WORKER_CORES: 4
       SPARK_WORKER_MEMORY: 2g
@@ -309,7 +307,6 @@ services:
     command: ["spark-submit", "--class", "org.apache.spark.sql.connect.service.SparkConnectServer",
               "--name", "spark-connect", "spark-internal"]
     environment:
-      <<: *s3-env   # driver ghi metadata Iceberg lên MinIO bằng S3FileIO
       # Executor gọi ngược về driver theo tên này
       SPARK_LOCAL_HOSTNAME: spark-connect
     ports:

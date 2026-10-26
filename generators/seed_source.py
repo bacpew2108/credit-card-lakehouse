@@ -127,8 +127,8 @@ def upload_mcc(jsonl: str) -> str:
 
     client = Minio(
         os.environ.get("MINIO_ENDPOINT", "localhost:9000"),
-        access_key=os.environ["MINIO_ACCESS_KEY"],
-        secret_key=os.environ["MINIO_SECRET_KEY"],
+        access_key="landing-writer",   # tài khoản chỉ có quyền trên bucket landing
+        secret_key=os.environ["MINIO_SECRET_LANDING_WRITER"],
         secure=False,
         region="us-east-1",
     )
