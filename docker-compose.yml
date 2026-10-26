@@ -4,9 +4,29 @@ name: lakehouse
 #   make up-core  → docker compose up -d
 #   make up       → docker compose --profile bi up -d
 
+# Tài khoản dịch vụ MinIO cho S3FileIO (Spark) và boto3 (job đọc bucket landing)
+x-s3-env: &s3-env
+  AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+  AWS_REGION: us-east-1
+
+# Client trong Airflow (pyspark-client) và cụm Spark phải cùng Python và PySpark:
+# UDF Python được pickle ở client rồi chạy trên executor
+x-spark-build-args: &spark-build-args
+  PYTHON_VERSION: "3.13"
+  PYSPARK_VERSION: 4.0.4
+
+x-spark-common: &spark-common
+  image: lakehouse-spark:4.0.4
+  volumes:
+    - ./infra/spark:/opt/spark-conf:ro
+  restart: unless-stopped
+  networks:
+    - lakehouse
+
 x-airflow-common:
   &airflow-common
-  image: lakehouse-airflow:3.3.1-spark4.0.4
+  image: lakehouse-airflow:3.3.1-sparkclient4.0.4
   environment:
     &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -23,11 +43,9 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
     # Kết nối hệ thống nguồn cho SqlSensor (dag_monthly)
     AIRFLOW_CONN_CORE_CARD: postgresql://${SOURCE_DB_USER}:${SOURCE_DB_PASSWORD}@postgres-source:5432/${SOURCE_DB_NAME}
-    # Spark local: cấu hình catalog trong infra/spark, thông tin S3 qua biến AWS_*
-    SPARK_CONF_DIR: /opt/spark-conf
-    AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-    AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-    AWS_REGION: us-east-1
+    # Job Spark là client Spark Connect: pyspark-client gửi kế hoạch tới driver trong spark-connect
+    SPARK_REMOTE: sc://spark-connect:15002
+    <<: *s3-env
     SOURCE_JDBC_URL: jdbc:postgresql://postgres-source:5432/${SOURCE_DB_NAME}
     SOURCE_DB_USER: ${SOURCE_DB_USER}
     SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
@@ -40,7 +58,6 @@ x-airflow-common:
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./spark:/opt/airflow/spark:ro
-    - ./infra/spark:/opt/spark-conf:ro
   depends_on:
     &airflow-depends
     postgres-meta:
@@ -53,7 +70,7 @@ x-airflow-common:
 services:
   # ---------------------------------------------------------------- Lưu trữ
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
+    image: &minio-image minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: minio
     command: server /data --console-address ":9001"
     ports:
@@ -76,7 +93,7 @@ services:
       - lakehouse
 
   minio-init:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
+    image: *minio-image
     container_name: minio-init
     depends_on:
       minio:
@@ -223,7 +240,7 @@ services:
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog:ro
     healthcheck:
-      test: ["CMD-SHELL", "trino --execute 'SELECT 1' || exit 1"]
+      test: ["CMD", "/usr/lib/trino/bin/health-check"]
       interval: 10s
       timeout: 10s
       retries: 12
@@ -236,11 +253,84 @@ services:
     networks:
       - lakehouse
 
-  # ---------------------------------------------------------------- Điều phối + Spark
+  # ---------------------------------------------------------------- Spark
+  # spark-connect là driver thường trực nhận job qua Spark Connect, executor chạy trên spark-worker.
+  spark-master:
+    <<: *spark-common
+    build:
+      context: ./infra/spark
+      args: *spark-build-args
+    container_name: spark-master
+    command: ["spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+    ports:
+      - "8090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 512m
+
+  spark-worker:
+    <<: *spark-common
+    container_name: spark-worker
+    command: ["spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    environment:
+      <<: *s3-env   # executor ghi Iceberg lên MinIO bằng S3FileIO
+      SPARK_DAEMON_MEMORY: 256m
+      SPARK_WORKER_CORES: 4
+      SPARK_WORKER_MEMORY: 2g
+      # Tên mà master và driver dùng để gọi tới worker/executor trong mạng lakehouse
+      SPARK_LOCAL_HOSTNAME: spark-worker
+      # UDF Python trên executor import module trong spark/common
+      PYTHONPATH: /opt/spark-apps
+    volumes:
+      - ./spark:/opt/spark-apps:ro
+      - ./infra/spark:/opt/spark-conf:ro
+    ports:
+      - "8091:8081"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Worker tự đăng ký lại khi master lên sau
+    depends_on:
+      - spark-master
+    # Worker 2g cho executor + overhead + tiến trình Python của UDF
+    mem_limit: 3g
+
+  spark-connect:
+    <<: *spark-common
+    container_name: spark-connect
+    command: ["spark-submit", "--class", "org.apache.spark.sql.connect.service.SparkConnectServer",
+              "--name", "spark-connect", "spark-internal"]
+    environment:
+      <<: *s3-env   # driver ghi metadata Iceberg lên MinIO bằng S3FileIO
+      # Executor gọi ngược về driver theo tên này
+      SPARK_LOCAL_HOSTNAME: spark-connect
+    ports:
+      - "4040:4040"   # Spark UI của driver: các session/job đã chạy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/15002"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      - spark-master
+    mem_limit: 1536m
+
+  # ---------------------------------------------------------------- Điều phối
   airflow-init:
     <<: *airflow-common
     build:
       context: ./infra/airflow
+      args: *spark-build-args
     container_name: airflow-init
     environment:
       <<: *airflow-env
@@ -286,8 +376,10 @@ services:
         condition: service_completed_successfully
       postgres-source:
         condition: service_healthy
-    # LocalExecutor chạy task (kể cả spark-submit) ngay trong container này
-    mem_limit: 3g
+      spark-connect:
+        condition: service_started
+    # LocalExecutor chạy task ngay trong container này; Spark chạy ở spark-connect/spark-worker
+    mem_limit: 2g
     restart: unless-stopped
 
   airflow-dag-processor:

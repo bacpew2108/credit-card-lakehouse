@@ -1,13 +1,11 @@
 """Kiểm thử các hàm thuần của lớp Bronze (spark/common/helpers.py), không cần Spark."""
 
-import sys
+import argparse
 from datetime import date
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spark"))
-from common import helpers as h  # noqa: E402
+from common import helpers as h
 
 
 def test_month_bounds_and_year_end():
@@ -27,6 +25,17 @@ def test_iter_months_covers_whole_dataset():
     assert h.iter_months("2019-11", "2020-02") == ["2019-11", "2019-12", "2020-01", "2020-02"]
     with pytest.raises(ValueError):
         h.iter_months("2019-03", "2019-02")
+
+
+def test_resolve_months_accepts_one_form_only():
+    ap = argparse.ArgumentParser()
+    h.add_month_args(ap)
+    assert h.resolve_months(ap.parse_args(["--month", "2019-03"])) == ["2019-03"]
+    assert h.resolve_months(ap.parse_args(["--from", "2019-11", "--to", "2020-01"])) == [
+        "2019-11", "2019-12", "2020-01"]
+    for argv in ([], ["--from", "2019-01"], ["--month", "2019-01", "--to", "2019-02"]):
+        with pytest.raises(ValueError):
+            h.resolve_months(ap.parse_args(argv))
 
 
 def test_month_filter_uses_half_open_range():
@@ -71,3 +80,6 @@ def test_require_secret(bad):
 def test_ref_batch_id():
     assert h.ref_batch_id(date(2026, 10, 15)) == "ref_20261015"
     assert h.ref_batch_id().startswith("ref_")
+    assert h.check_ref_batch_id("ref_20261015") == "ref_20261015"
+    with pytest.raises(ValueError):
+        h.check_ref_batch_id("2019-03")

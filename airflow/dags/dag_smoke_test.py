@@ -1,4 +1,4 @@
-"""Kiểm chứng Airflow → spark-submit (local) → Iceberg/Lakekeeper (tuần 2)."""
+"""Kiểm chứng Airflow → python job (client Spark Connect) → Iceberg/Lakekeeper (tuần 2)."""
 
 from datetime import datetime
 
@@ -14,5 +14,5 @@ with DAG(
 ) as dag:
     BashOperator(
         task_id="spark_write_iceberg",
-        bash_command="spark-submit /opt/airflow/spark/smoke_test.py write",
+        bash_command="python /opt/airflow/spark/smoke_test.py write",
     )

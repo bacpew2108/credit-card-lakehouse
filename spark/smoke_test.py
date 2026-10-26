@@ -1,7 +1,7 @@
-"""Smoke test tuần 2: Spark (local) ghi bảng Iceberg qua Lakekeeper → Trino đọc cùng bảng.
+"""Smoke test tuần 2: Spark (qua Spark Connect) ghi bảng Iceberg qua Lakekeeper → Trino đọc cùng bảng.
 
-    spark-submit /opt/airflow/spark/smoke_test.py write   # tạo namespace + ghi bảng
-    spark-submit /opt/airflow/spark/smoke_test.py check   # đọc lại, kể cả dòng do Trino ghi
+    python /opt/airflow/spark/smoke_test.py write   # tạo namespace + ghi bảng
+    python /opt/airflow/spark/smoke_test.py check   # đọc lại, kể cả dòng do Trino ghi
 """
 
 import sys

@@ -32,6 +32,17 @@ MCC_COLS = ["mcc", "description"]
 # Bronze giữ mọi cột ở dạng chuỗi: ép ::text ngay trong câu truy vấn nguồn
 CORE_CARD_TEXT_COLS = {"transactions": TXN_COLS, "customers": CUSTOMER_COLS, "cards": CARD_SRC_COLS}
 
+# Bảng Bronze và tên nguồn ghi trong ops.ingestion_log (Silver tra lần nạp theo tên nguồn)
+BRONZE_TXN = "lakehouse.bronze.transactions_raw"
+BRONZE_CUSTOMERS = "lakehouse.bronze.customers_raw"
+BRONZE_CARDS = "lakehouse.bronze.cards_raw"
+BRONZE_MCC = "lakehouse.bronze.mcc_codes_raw"
+SRC_TXN = "core_card.transactions"
+SRC_CUSTOMERS = "core_card.customers"
+SRC_CARDS = "core_card.cards"
+MCC_BUCKET, MCC_KEY = "landing", "reference/mcc_codes/mcc_codes.jsonl"
+SRC_MCC = f"s3://{MCC_BUCKET}/{MCC_KEY}"
+
 
 def parse_month(month):
     """'2019-03' → date(2019, 3, 1); sai định dạng thì báo lỗi."""
@@ -63,6 +74,22 @@ def iter_months(first, last):
     return out
 
 
+def add_month_args(ap):
+    """Thêm --month, --from, --to vào argparse; đọc lại bằng resolve_months(args)."""
+    ap.add_argument("--month")
+    ap.add_argument("--from", dest="first")
+    ap.add_argument("--to", dest="last")
+
+
+def resolve_months(args):
+    """Danh sách tháng từ --month M hoặc --from A --to B (chỉ được dùng một trong hai cách)."""
+    if args.month and not (args.first or args.last):
+        return [f"{parse_month(args.month):%Y-%m}"]
+    if args.first and args.last and not args.month:
+        return iter_months(args.first, args.last)
+    raise ValueError("dùng --month M hoặc --from A --to B")
+
+
 def select_text_sql(table, where=""):
     """SELECT các cột nghiệp vụ của bảng core_card, mọi cột ép sang text."""
     cols = ", ".join(f"{c}::text AS {c}" for c in CORE_CARD_TEXT_COLS[table])
@@ -79,6 +106,12 @@ def ref_batch_id(day=None):
     """_batch_id của dữ liệu tham chiếu: ref_YYYYMMDD (mặc định là hôm nay, UTC)."""
     day = day or datetime.now(timezone.utc).date()
     return f"ref_{day:%Y%m%d}"
+
+
+def check_ref_batch_id(batch_id):
+    if not batch_id.startswith("ref_"):
+        raise ValueError("--batch-id phải bắt đầu bằng ref_")
+    return batch_id
 
 
 def require_secret(secret):

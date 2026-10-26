@@ -9,9 +9,13 @@ from operator import and_
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql import types as T
 
 LOG_TABLE = "lakehouse.ops.ingestion_log"
+LOG_COLS = """
+    run_id STRING, source STRING, batch_id STRING,
+    source_count BIGINT, row_count BIGINT, checksum STRING,
+    status STRING, message STRING,
+    started_at TIMESTAMP, finished_at TIMESTAMP"""
 
 
 def get_spark(app):
@@ -19,28 +23,26 @@ def get_spark(app):
     for ns in ("bronze", "silver", "ops"):
         spark.sql(f"CREATE NAMESPACE IF NOT EXISTS lakehouse.{ns}")
     spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {LOG_TABLE} (
-            run_id STRING, source STRING, batch_id STRING,
-            source_count BIGINT, row_count BIGINT, checksum STRING,
-            status STRING, message STRING,
-            started_at TIMESTAMP, finished_at TIMESTAMP
+        CREATE TABLE IF NOT EXISTS {LOG_TABLE} ({LOG_COLS}
         ) USING iceberg
         TBLPROPERTIES ('format-version' = '2')
     """)
     return spark
 
 
-def ensure_bronze_table(spark, table, cols, partition=None):
-    """Bảng Bronze: mọi cột nghiệp vụ là STRING, thêm 3 cột metadata.
+def ensure_bronze_table(spark, table, cols, partition=None, extra_ddl=None):
+    """Bảng Bronze: mọi cột nghiệp vụ là STRING, thêm 3 cột metadata (và extra_ddl nếu có,
+    VD bảng cách ly giữ nguyên dòng Bronze kèm lý do).
 
     Chỉ CREATE IF NOT EXISTS: không dùng REPLACE chỉ có DDL vì với Lakekeeper
     nó không xóa dữ liệu cũ (docs/week2.md).
     """
     body = ",\n            ".join(f"`{c}` STRING" for c in cols)
+    extra = f",\n            {extra_ddl}" if extra_ddl else ""
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {table} (
             {body},
-            _ingested_at TIMESTAMP, _source STRING, _batch_id STRING
+            _ingested_at TIMESTAMP, _source STRING, _batch_id STRING{extra}
         ) USING iceberg
         {f"PARTITIONED BY ({partition})" if partition else ""}
         TBLPROPERTIES ('format-version' = '2')
@@ -89,6 +91,12 @@ def checksum(df, cols):
     return int(row["n"]), str(row["s"] or 0)
 
 
+def overwrite_table(spark, df, table, cols):
+    """Ghi đè toàn bảng (bảng tham chiếu), trả về (row_count, checksum) đọc lại sau khi ghi."""
+    df.writeTo(table).overwrite(F.lit(True))
+    return checksum(spark.table(table), cols)
+
+
 def run_id():
     # BashOperator của Airflow đặt sẵn biến này; chạy tay thì sinh theo thời gian
     return os.environ.get("AIRFLOW_CTX_DAG_RUN_ID") or f"manual__{datetime.now(timezone.utc):%Y%m%dT%H%M%S}"
@@ -108,9 +116,10 @@ def loaded_batches(spark, source):
     return {b for b, st in latest_status(spark, source).items() if st == "SUCCESS"}
 
 
-def require_bronze(spark, source, batch_id=None):
+def require_bronze(spark, source, batch_id=None, statuses=None):
     """Silver chỉ đọc Bronze đã nạp thành công. Không truyền batch_id thì xét lần nạp gần
-    nhất của nguồn (bảng tham chiếu ghi đè toàn bảng). Trả về batch_id đã kiểm tra."""
+    nhất của nguồn (bảng tham chiếu ghi đè toàn bảng). statuses là kết quả latest_status đã
+    đọc sẵn (khi kiểm tra nhiều tháng). Trả về batch_id đã kiểm tra."""
     if batch_id is None:
         row = spark.sql(f"""
             SELECT max_by(batch_id, finished_at) AS batch_id, max_by(status, finished_at) AS status
@@ -118,7 +127,7 @@ def require_bronze(spark, source, batch_id=None):
         """).first()
         batch_id, status = row.batch_id, row.status
     else:
-        status = latest_status(spark, source).get(batch_id)
+        status = (latest_status(spark, source) if statuses is None else statuses).get(batch_id)
     if status != "SUCCESS":
         raise RuntimeError(f"Bronze {source} {batch_id or ''}: lần nạp gần nhất là {status or 'chưa nạp'}, "
                            "không dựng Silver")
@@ -176,20 +185,6 @@ def merge_changes(spark, src, table, key, cols, scope=None):
     return counts
 
 
-LOG_SCHEMA = T.StructType([
-    T.StructField("run_id", T.StringType()),
-    T.StructField("source", T.StringType()),
-    T.StructField("batch_id", T.StringType()),
-    T.StructField("source_count", T.LongType()),
-    T.StructField("row_count", T.LongType()),
-    T.StructField("checksum", T.StringType()),
-    T.StructField("status", T.StringType()),
-    T.StructField("message", T.StringType()),
-    T.StructField("started_at", T.TimestampType()),
-    T.StructField("finished_at", T.TimestampType()),
-])
-
-
 def run_batch(spark, rid, source, batch_id, load, done=frozenset(), force=False):
     """Nạp một batch có ghi ops.ingestion_log.
 
@@ -214,7 +209,7 @@ def run_batch(spark, rid, source, batch_id, load, done=frozenset(), force=False)
     finally:
         row = (rid, source, batch_id, src_n, row_n, cks, status, msg,
                started, datetime.now(timezone.utc))
-        spark.createDataFrame([row], LOG_SCHEMA).writeTo(LOG_TABLE).append()
+        spark.createDataFrame([row], LOG_COLS).writeTo(LOG_TABLE).append()
         print(f"[{status.lower()}] {source} {batch_id}: nguồn {src_n}, bronze {row_n}, "
               f"checksum {cks}, {time.time() - t0:.1f}s")
     return True

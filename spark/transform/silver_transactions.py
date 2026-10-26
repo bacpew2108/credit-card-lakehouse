@@ -1,7 +1,7 @@
 """Bronze → Silver cho giao dịch, theo từng tháng (mục 5.3 và 6 Design Doc).
 
-    spark-submit silver_transactions.py --month 2019-03
-    spark-submit silver_transactions.py --from 2010-01 --to 2019-10
+    python silver_transactions.py --month 2019-03
+    python silver_transactions.py --from 2010-01 --to 2019-10
 
 Với mỗi tháng M:
 1. Chỉ đọc bronze.transactions_raw của M nếu lần nạp Bronze gần nhất của M là SUCCESS.
@@ -23,10 +23,8 @@ from common import lakehouse as lh
 from transform import silver_merchants
 from transform import silver_transforms as st
 
-BRONZE = "lakehouse.bronze.transactions_raw"
 SILVER = "lakehouse.silver.transactions"
 QUARANTINE = "lakehouse.ops.quarantine_transactions"
-SOURCE = "core_card.transactions"
 
 SILVER_DDL = """
     transaction_id BIGINT, transaction_ts TIMESTAMP_NTZ, customer_id INT, card_id INT,
@@ -37,16 +35,8 @@ SILVER_DDL = """
 
 def ensure_tables(spark):
     lh.ensure_silver_table(spark, SILVER, SILVER_DDL, partition="months(transaction_ts)")
-    bronze_cols = ", ".join(f"`{c}` STRING" for c in h.TXN_COLS)
-    spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {QUARANTINE} (
-            {bronze_cols},
-            _ingested_at TIMESTAMP, _source STRING, _batch_id STRING,
-            rule_id STRING, reason STRING, run_id STRING, quarantined_at TIMESTAMP
-        ) USING iceberg
-        PARTITIONED BY (_batch_id)
-        TBLPROPERTIES ('format-version' = '2')
-    """)
+    lh.ensure_bronze_table(spark, QUARANTINE, h.TXN_COLS, partition="_batch_id",
+                           extra_ddl="rule_id STRING, reason STRING, run_id STRING, quarantined_at TIMESTAMP")
 
 
 def month_scope(month):
@@ -56,10 +46,10 @@ def month_scope(month):
             f"AND {{t}}transaction_ts < TIMESTAMP_NTZ '{end} 00:00:00'")
 
 
-def process_month(spark, rid, month):
+def process_month(spark, rid, month, statuses):
     t0 = time.time()
-    lh.require_bronze(spark, SOURCE, month)
-    bronze = spark.table(BRONZE).where(F.col("_batch_id") == month)
+    lh.require_bronze(spark, h.SRC_TXN, month, statuses)
+    bronze = spark.table(h.BRONZE_TXN).where(F.col("_batch_id") == month)
     # Tính rule một lần rồi cache: cả phần ghi quarantine lẫn MERGE đều dùng lại
     marked = st.mark_batch(bronze, month).persist()
     bronze_n = marked.count()
@@ -76,9 +66,10 @@ def process_month(spark, rid, month):
 
     src = st.transactions(valid).withColumn("_batch_id", F.lit(month))
     cols = [c for c in st.TXN_COLS if c != "transaction_id"]
-    counts = lh.merge_changes(spark, src, SILVER, "transaction_id", cols, scope=month_scope(month))
+    scope = month_scope(month)
+    counts = lh.merge_changes(spark, src, SILVER, "transaction_id", cols, scope=scope)
 
-    silver_n = spark.table(SILVER).where(month_scope(month).format(t="")).count()
+    silver_n = spark.table(SILVER).where(scope.format(t="")).count()
     q_n = spark.table(QUARANTINE).where(in_month).count()
     marked.unpersist()
     msg = (f"{month}: bronze {bronze_n} = silver {silver_n} + quarantine {q_n}; "
@@ -91,18 +82,11 @@ def process_month(spark, rid, month):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--month")
-    ap.add_argument("--from", dest="first")
-    ap.add_argument("--to", dest="last")
+    h.add_month_args(ap)
     ap.add_argument("--skip-merchants", action="store_true", help="không tính lại silver.merchants")
     args = ap.parse_args()
     try:
-        if args.month and not (args.first or args.last):
-            months = [f"{h.parse_month(args.month):%Y-%m}"]
-        elif args.first and args.last and not args.month:
-            months = h.iter_months(args.first, args.last)
-        else:
-            ap.error("dùng --month M hoặc --from A --to B")
+        months = h.resolve_months(args)
     except ValueError as e:
         ap.error(str(e))
 
@@ -110,7 +94,8 @@ def main():
     try:
         ensure_tables(spark)
         rid, t0 = lh.run_id(), time.time()
-        quarantined = sum(process_month(spark, rid, m) for m in months)
+        statuses = lh.latest_status(spark, h.SRC_TXN)   # đọc ingestion_log một lần cho mọi tháng
+        quarantined = sum(process_month(spark, rid, m, statuses) for m in months)
         print(f"Đã dựng Silver {len(months)} tháng ({months[0]} → {months[-1]}), "
               f"cách ly {quarantined} dòng, {time.time() - t0:.0f}s")
         if not args.skip_merchants:

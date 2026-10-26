@@ -23,7 +23,7 @@ make bronze-range FROM=2010-01 TO=2019-10       # nhiều tháng trong một Spa
 make bronze-status                              # số dòng từng bảng, 10 lần nạp gần nhất
 ```
 
-Batch đã nạp thành công thì bị bỏ qua; thêm `FORCE=1` để nạp lại. Job chạy bằng `spark-submit` trong container `airflow-scheduler`, giống cách các DAG ở tuần 6 sẽ gọi.
+Batch đã nạp thành công thì bị bỏ qua; thêm `FORCE=1` để nạp lại. Job chạy bằng `python` trong container `airflow-scheduler` và gửi việc tới cụm Spark qua Spark Connect, giống cách các DAG ở tuần 6 sẽ gọi.
 
 ## Cách hoạt động
 
@@ -48,7 +48,7 @@ Mỗi batch chạy qua `run_batch`:
 | Kiểm tra | Kết quả |
 |---|---|
 | `make test` | 23 passed (18 test mới, có vector RFC 4231 cho HMAC-SHA256) |
-| `make bronze-ref` | customers 2.000, cards 6.146, mcc 109; nguồn = Bronze; 38 giây cho 2 lần spark-submit |
+| `make bronze-ref` | customers 2.000, cards 6.146, mcc 109; nguồn = Bronze; 38 giây cho 2 job |
 | `make bronze MONTH=2019-03` | 118.548 dòng, khớp tuần 3; 5,4 giây không tính thời gian khởi động Spark |
 | Chạy lại không có FORCE | Bỏ qua (cả giao dịch lẫn tham chiếu) |
 | Chạy lại với `FORCE=1` | Checksum giống hệt; `$snapshots` có thêm một snapshot `overwrite` (xóa 118.548, thêm 118.548); tổng số dòng không đổi |
