@@ -1,4 +1,4 @@
-# Mapping nguồn → Gold (tuần 3, cập nhật tuần 5)
+# Mapping nguồn → Gold
 
 Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi ra sao, và rule DQ nào kiểm tra nó. Kiểu dữ liệu chi tiết nằm trong [data_model.md](data_model.md). Ký hiệu **✗** nghĩa là cột dừng lại ở tầng đó, không đi tiếp.
 
@@ -49,10 +49,10 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | card_id | card_id | card_id | card_key | Tra dim_card, không khớp thì gán −1 | R04, R08, R14 |
 | amount | amount | amount, is_refund | amount, txn_profile_key (is_refund) | `'$-77.00'` → decimal; < 0 là hoàn tiền | **R02** (BLOCK), R11, R12 |
 | use_chip | use_chip | channel, is_online | txn_profile_key (channel) | `Swipe Transaction` → `Swipe`, … | R07, R08 |
-| merchant_id | merchant_id | merchant_id | merchant_key | → silver.card.merchants → dim_merchant | |
-| merchant_city | merchant_city | merchant_city | (qua dim_merchant) | `ONLINE` với giao dịch trực tuyến | R07 |
-| merchant_state | merchant_state | merchant_state, is_foreign | (qua dim_merchant) | Không phải mã bang thì là nước ngoài | |
-| zip | zip | zip | (qua dim_merchant) | `'2840.0'` → `'02840'` | |
+| merchant_id | merchant_id | merchant_id | merchant_key | → silver.card.merchants → dim_merchant (chuỗi cửa hàng, vị trí chính) | |
+| merchant_city | merchant_city | merchant_city | location_key (qua dim_location) | `ONLINE` với giao dịch trực tuyến | R07 |
+| merchant_state | merchant_state | merchant_state, is_foreign | location_key (qua dim_location) | Không phải mã bang thì là nước ngoài | |
+| zip | zip | zip | location_key (qua dim_location) | `'2840.0'` → `'02840'` | |
 | mcc | mcc | mcc_code | mcc_key | Tra dim_mcc, không khớp thì gán −1 | R06 |
 | errors | errors | error_list, has_error | txn_profile_key (error_combo, has_error) | Tách theo dấu phẩy → mảng | |
 | (tháng M của lần chạy) | `_batch_id` | `_batch_id` | batch_id | Tháng được trích xuất, VD `2019-03` | R03, R10, R11 |
@@ -74,7 +74,8 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | Bảng | Suy ra từ | Cách dựng |
 |---|---|---|
 | silver.card.merchants → dim_merchant | silver.card.transactions | Theo từng merchant_id, lấy vị trí (city, state, zip) xuất hiện nhiều nhất; hòa thì lấy vị trí gần nhất, rồi theo thứ tự chữ cái |
-| dim_txn_profile | silver.card.transactions | DISTINCT (channel, error_combo, has_error, is_refund) |
+| dim_location | silver.card.transactions | DISTINCT (merchant_city, merchant_state, zip): nơi từng giao dịch diễn ra. Khác vị trí chính của dim_merchant ở 61% giao dịch |
+| dim_txn_profile | silver.card.transactions | DISTINCT (channel, error_combo, is_refund); has_error = error_combo khác `'None'` |
 | dim_date | Lịch | Sinh từ 2010-01-01 đến 2019-12-31 |
 | mart_* | fact + dimension | Xem data_model.md mục 3 |
 
@@ -89,7 +90,7 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 | R12 | Silver (task dq_silver) | Số giao dịch và tổng tiền của tháng so với 12 tháng trước; chỉ cảnh báo |
 | R09 | Silver tham chiếu (dag_reference) | credit_score, num_credit_cards trên silver.card.customers |
 | I01 | Silver (merchants) | Merchant nhiều vị trí; chỉ ghi nhận |
-| R11 | Gold | silver = fact theo số dòng và tổng amount của tháng |
+| R11 | Gold (task reconcile_silver_gold) | silver = fact = mart_monthly_kpi theo số dòng và tổng amount của tháng |
 | R13 | dag_maintenance | Quét toàn bộ bucket bronze, silver, gold, ops tìm số thẻ đầy đủ |
 
 Rule xét từng bản ghi (R01–R09, R14) bị nâng thành BLOCK khi tỷ lệ vi phạm của batch vượt 1%. Quy ước trạng thái ở [data_model.md](data_model.md) mục 4.

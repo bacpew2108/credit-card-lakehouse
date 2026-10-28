@@ -1,8 +1,8 @@
 """dag_reference: dữ liệu tham chiếu (mục 8 Design Doc), chạy thủ công hoặc khi nguồn thay đổi.
 
-customers, cards (token hóa) và mcc_codes → Bronze → Silver → R09. Batch là ref_YYYYMMDD theo
-ngày chạy; batch đã nạp thành công thì bỏ qua, trừ khi bật force. dq_reference thất bại khi có
-rule BLOCK.
+customers, cards (token hóa) và mcc_codes → Bronze → Silver → R09 → dim_customer, dim_card,
+dim_mcc, dim_date của Gold. Batch là ref_YYYYMMDD theo ngày chạy; batch đã nạp thành công thì bỏ
+qua, trừ khi bật force. dq_reference thất bại khi có rule BLOCK, nên dimension không được cập nhật.
 """
 
 from datetime import datetime, timedelta
@@ -45,4 +45,9 @@ with DAG(
         retries=0,
     )
 
-    [bronze_customers_cards, bronze_mcc_codes] >> silver_reference >> dq_reference
+    gold_dimensions = BashOperator(
+        task_id="gold_dimensions",
+        bash_command=f"{JOB}/transform/gold_dimensions.py reference",
+    )
+
+    [bronze_customers_cards, bronze_mcc_codes] >> silver_reference >> dq_reference >> gold_dimensions

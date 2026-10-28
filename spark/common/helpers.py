@@ -51,6 +51,13 @@ SILVER_MCC = "silver.card.mcc_codes"
 SILVER_MERCHANTS = "silver.card.merchants"
 QUARANTINE = "ops.pipeline.quarantine_transactions"
 
+GOLD_FACT = "gold.card.fact_transaction"
+GOLD_DIMS = {name: f"gold.card.dim_{name}"
+             for name in ("customer", "card", "merchant", "location", "mcc", "date", "txn_profile")}
+MARTS = {name: f"gold.card.mart_{name}"
+         for name in ("monthly_kpi", "mcc_monthly", "geo_monthly", "error_monthly",
+                      "customer_segment_monthly", "card_monthly")}
+
 
 def parse_month(month):
     """'2019-03' → date(2019, 3, 1); sai định dạng thì báo lỗi."""

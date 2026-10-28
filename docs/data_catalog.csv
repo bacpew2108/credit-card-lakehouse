@@ -92,6 +92,12 @@ gold,dim_merchant,merchant_state,none,keep,
 gold,dim_merchant,zip,none,keep,
 gold,dim_merchant,is_online,none,keep,
 gold,dim_merchant,is_foreign,none,keep,
+gold,dim_location,location_key,none,keep,
+gold,dim_location,merchant_city,none,keep,"Nơi giao dịch diễn ra, không phải địa chỉ của khách"
+gold,dim_location,merchant_state,none,keep,
+gold,dim_location,zip,none,keep,"Zip của merchant, không phải của khách"
+gold,dim_location,is_online,none,keep,
+gold,dim_location,is_foreign,none,keep,
 gold,dim_mcc,mcc_key,none,keep,
 gold,dim_mcc,mcc_code,none,keep,
 gold,dim_mcc,description,none,keep,
@@ -115,6 +121,7 @@ gold,fact_transaction,date_key,none,keep,
 gold,fact_transaction,customer_key,indirect,keep,Chuyển về −2 khi khách yêu cầu xóa
 gold,fact_transaction,card_key,indirect,keep,Chuyển về −2 khi khách yêu cầu xóa
 gold,fact_transaction,merchant_key,none,keep,
+gold,fact_transaction,location_key,none,keep,
 gold,fact_transaction,mcc_key,none,keep,
 gold,fact_transaction,txn_profile_key,none,keep,
 gold,fact_transaction,transaction_ts,indirect,keep,
