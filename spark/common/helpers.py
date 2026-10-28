@@ -1,4 +1,4 @@
-"""Hàm thuần cho lớp Bronze: không import pyspark, nên pytest chạy được trên máy host."""
+"""Hằng số và hàm thuần dùng chung: không import pyspark, nên pytest chạy được trên máy host."""
 
 import hmac
 import re
@@ -44,6 +44,13 @@ SRC_CARDS = "core_card.cards"
 MCC_BUCKET, MCC_KEY = "landing", "reference/mcc_codes/mcc_codes.jsonl"
 SRC_MCC = f"s3://{MCC_BUCKET}/{MCC_KEY}"
 
+SILVER_TXN = "silver.card.transactions"
+SILVER_CUSTOMERS = "silver.card.customers"
+SILVER_CARDS = "silver.card.cards"
+SILVER_MCC = "silver.card.mcc_codes"
+SILVER_MERCHANTS = "silver.card.merchants"
+QUARANTINE = "ops.pipeline.quarantine_transactions"
+
 
 def parse_month(month):
     """'2019-03' → date(2019, 3, 1); sai định dạng thì báo lỗi."""
@@ -61,6 +68,13 @@ def month_bounds(month):
     """Khoảng [đầu tháng M, đầu tháng M+1) dạng 'YYYY-MM-DD'."""
     start = parse_month(month)
     return start.isoformat(), next_month(start).isoformat()
+
+
+def add_months(month, k):
+    """'2019-03' cộng k tháng (k có thể âm) → 'YYYY-MM'."""
+    d = parse_month(month)
+    i = d.year * 12 + d.month - 1 + k
+    return f"{i // 12:04d}-{i % 12 + 1:02d}"
 
 
 def iter_months(first, last):
@@ -101,6 +115,14 @@ def month_filter(month):
     """Điều kiện lọc giao dịch tháng M (dùng index transactions_date_idx)."""
     start, end = month_bounds(month)  # đã kiểm tra định dạng nên ghép chuỗi an toàn
     return f"date >= TIMESTAMP '{start}' AND date < TIMESTAMP '{end}'"
+
+
+def month_scope(month):
+    """Điều kiện SQL giới hạn bảng Silver giao dịch trong tháng M, viết với tiền tố {t} trước tên
+    cột (xem lakehouse.merge_changes); Iceberg chỉ quét partition của M."""
+    start, end = month_bounds(month)
+    return (f"{{t}}transaction_ts >= TIMESTAMP_NTZ '{start} 00:00:00' "
+            f"AND {{t}}transaction_ts < TIMESTAMP_NTZ '{end} 00:00:00'")
 
 
 def ref_batch_id(day=None):

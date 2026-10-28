@@ -482,28 +482,30 @@ def profile(data_dir: Path) -> str:
     # ---------------------------------------------------------------- 8
     r.h(2, "8. Biến động theo tháng (cơ sở cho R12 ±3σ)")
     r12 = r.rows("""
-        WITH m AS (SELECT month, count(*) n FROM txp GROUP BY 1),
+        WITH m AS (SELECT month, count(*) n, sum(amount_num) amt FROM txp GROUP BY 1),
         w AS (
-            SELECT month, n,
-                   avg(n) OVER win AS mu, stddev_samp(n) OVER win AS sd,
+            SELECT month, n, amt,
+                   avg(n) OVER win AS mu_n, stddev_samp(n) OVER win AS sd_n,
+                   avg(amt) OVER win AS mu_a, stddev_samp(amt) OVER win AS sd_a,
                    count(*) OVER win AS k
             FROM m WINDOW win AS (ORDER BY month ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING)
         )
-        SELECT month, n, round(mu), round(sd), round((n - mu) / sd, 2)
-        FROM w WHERE k = 12 AND abs(n - mu) > 3 * sd ORDER BY month
+        SELECT month, n, round((n - mu_n) / sd_n, 2), round(amt), round((amt - mu_a) / sd_a, 2)
+        FROM w WHERE k = 12 AND (abs(n - mu_n) > 3 * sd_n OR abs(amt - mu_a) > 3 * sd_a) ORDER BY month
     """)
     if r12:
-        r.p("Tháng có số giao dịch lệch quá ±3σ so với 12 tháng trước (R12 sẽ cảnh báo):")
+        r.p("Tháng có số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng trước (R12 sẽ cảnh báo):")
         r.p("")
-        r.p("| Tháng | Số giao dịch | TB 12 tháng trước | σ | z |")
+        r.p("| Tháng | Số giao dịch | z (số giao dịch) | Tổng tiền | z (tổng tiền) |")
         r.p("|---|---|---|---|---|")
         for row in r12:
             r.p("| " + " | ".join(fmt(v) for v in row) + " |")
         r.p("")
-        r.p("Số giao dịch tăng dần theo năm nên ±3σ trên cửa sổ trượt dễ báo động giả ở các năm đầu; "
-            "cân nhắc so sánh theo tăng trưởng hoặc chỉ cảnh báo (WARN) như thiết kế.")
+        r.p("Tháng 2 có ít ngày hơn nên số giao dịch và tổng tiền thấp hơn các tháng khác; R12 chỉ cảnh báo "
+            "(WARN), không chặn. Chia cho số ngày trong tháng không giúp được: số giao dịch tăng dần theo năm "
+            "nên khi đó lại có nhiều tháng bị báo nhầm hơn.")
     else:
-        r.p("Không có tháng nào lệch quá ±3σ so với 12 tháng trước.")
+        r.p("Không có tháng nào có số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng trước.")
 
     r.lines.append("")
     r.p(f"_Tổng thời gian profiling: {time.time() - t0:.0f} giây._")

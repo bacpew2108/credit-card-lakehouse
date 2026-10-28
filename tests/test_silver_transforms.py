@@ -1,6 +1,6 @@
 """Kiểm thử hàm biến đổi Bronze → Silver (spark/transform/silver_transforms.py).
 
-Chạy Spark local trên máy host (cần Java 17 và pyspark; make test đã thêm pyspark).
+Chạy Spark local trên máy host (fixture spark trong conftest.py; make test đã thêm pyspark).
 """
 
 import csv
@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pyspark")
-from pyspark.sql import SparkSession  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
 
 from common import helpers as h  # noqa: E402
@@ -20,18 +19,6 @@ from transform import silver_transforms as st  # noqa: E402
 from transform.silver_reference import MCC_GROUPS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.fixture(scope="module")
-def spark():
-    s = (SparkSession.builder.master("local[1]").appName("test_silver")
-         .config("spark.sql.session.timeZone", "UTC")
-         .config("spark.ui.enabled", "false")
-         .config("spark.sql.shuffle.partitions", "1")
-         .getOrCreate())
-    s.sparkContext.setLogLevel("ERROR")
-    yield s
-    s.stop()
 
 
 def apply(spark, fn, values):

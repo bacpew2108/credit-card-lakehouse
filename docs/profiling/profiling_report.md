@@ -1,6 +1,6 @@
 # Báo cáo profiling dữ liệu – Financial Transactions Dataset
 
-Sinh tự động bởi `docs/profiling/profile_dataset.py` lúc 2026-10-11 12:32, DuckDB 1.5.6. Mọi cột được đọc dạng chuỗi (`all_varchar`) như hệ thống nguồn cũ; thời gian nạp 18 giây.
+Sinh tự động bởi `docs/profiling/profile_dataset.py` lúc 2026-10-28 13:25, DuckDB 1.5.6. Mọi cột được đọc dạng chuỗi (`all_varchar`) như hệ thống nguồn cũ; thời gian nạp 8 giây.
 
 ## 1. Quy mô
 
@@ -51,17 +51,17 @@ Sinh tự động bởi `docs/profiling/profile_dataset.py` lúc 2026-10-11 12:3
 
 | Cột | Null/rỗng | Tỷ lệ null | Số giá trị khác nhau | Ví dụ |
 |---|---|---|---|---|
-| id | 0 | 0.00% | 13,305,915 | `7881722` |
-| date | 0 | 0.00% | 4,136,496 | `2010-01-01 00:01:00` |
-| client_id | 0 | 0.00% | 1,219 | `859` |
-| card_id | 0 | 0.00% | 4,071 | `5822` |
-| amount | 0 | 0.00% | 81,161 | `$8.05` |
+| id | 0 | 0.00% | 13,305,915 | `7475327` |
+| date | 0 | 0.00% | 4,136,496 | `2010-04-13 12:36:00` |
+| client_id | 0 | 0.00% | 1,219 | `1166` |
+| card_id | 0 | 0.00% | 4,071 | `4168` |
+| amount | 0 | 0.00% | 81,161 | `$24.68` |
 | use_chip | 0 | 0.00% | 3 | `Swipe Transaction` |
-| merchant_id | 0 | 0.00% | 74,831 | `98374` |
+| merchant_id | 0 | 0.00% | 74,831 | `20519` |
 | merchant_city | 0 | 0.00% | 12,492 | `Elkhart` |
-| merchant_state | 1,563,700 | 11.75% | 199 | `OH` |
+| merchant_state | 1,563,700 | 11.75% | 199 | `TX` |
 | zip | 1,652,706 | 12.42% | 25,256 | `38504.0` |
-| mcc | 0 | 0.00% | 109 | `5411` |
+| mcc | 0 | 0.00% | 109 | `5541` |
 | errors | 13,094,522 | 98.41% | 22 | `Insufficient Balance` |
 
 
@@ -282,6 +282,12 @@ Các cột tiền (định dạng `$1234`):
 
 ## 8. Biến động theo tháng (cơ sở cho R12 ±3σ)
 
-Không có tháng nào lệch quá ±3σ so với 12 tháng trước.
+Tháng có số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng trước (R12 sẽ cảnh báo):
 
-_Tổng thời gian profiling: 24 giây._
+| Tháng | Số giao dịch | z (số giao dịch) | Tổng tiền | z (tổng tiền) |
+|---|---|---|---|---|
+| 2019-02 | 106,385 | -2.84 | 4,539,678.00 | -3.08 |
+
+Tháng 2 có ít ngày hơn nên số giao dịch và tổng tiền thấp hơn các tháng khác; R12 chỉ cảnh báo (WARN), không chặn. Chia cho số ngày trong tháng không giúp được: số giao dịch tăng dần theo năm nên khi đó lại có nhiều tháng bị báo nhầm hơn.
+
+_Tổng thời gian profiling: 15 giây._

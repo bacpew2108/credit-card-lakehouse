@@ -1,4 +1,4 @@
-"""Phần dùng Spark chung: session, DDL, đọc JDBC, checksum, ops.pipeline.ingestion_log, MERGE cho Silver."""
+"""Phần dùng Spark chung: session, DDL, đọc JDBC, checksum, bảng vận hành trong ops.pipeline, MERGE cho Silver."""
 
 import os
 import time
@@ -18,17 +18,24 @@ LOG_COLS = """
     source_count BIGINT, row_count BIGINT, checksum STRING,
     status STRING, message STRING,
     started_at TIMESTAMP, finished_at TIMESTAMP"""
+# Kết quả rule chất lượng dữ liệu, một dòng cho mỗi (lần chạy, batch, rule); ghi bởi spark/quality
+DQ_TABLE = "ops.pipeline.dq_results"
+DQ_COLS = """
+    run_id STRING, batch_id STRING, rule_id STRING, severity STRING,
+    checked_count BIGINT, failed_count BIGINT, failed_ratio DOUBLE, status STRING,
+    details STRING, created_at TIMESTAMP"""
 
 
 def get_spark(app):
     spark = SparkSession.builder.appName(app).getOrCreate()
     for ns in NAMESPACES:
         spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {ns}")
-    spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {LOG_TABLE} ({LOG_COLS}
-        ) USING iceberg
-        TBLPROPERTIES ('format-version' = '2')
-    """)
+    for table, cols in ((LOG_TABLE, LOG_COLS), (DQ_TABLE, DQ_COLS)):
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {table} ({cols}
+            ) USING iceberg
+            TBLPROPERTIES ('format-version' = '2')
+        """)
     return spark
 
 

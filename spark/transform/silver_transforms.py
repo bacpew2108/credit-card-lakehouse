@@ -152,30 +152,45 @@ def _rule(rule_id, reason):
     return F.struct(F.lit(rule_id).alias("r"), F.lit(reason).alias("m"))
 
 
-def mark_batch(b, month):
+def mark_batch(b, month, other_ids=None):
     """Gắn rule BLOCK (mục 6 Design Doc) cho từng dòng của batch Bronze tháng M, trong một lượt.
 
     Trả về các cột Bronze + _id, _ts, _amount đã parse + _rule (struct r, m; NULL nếu hợp lệ).
-    Thứ tự xét: R01 (id rỗng) → R02 (amount, date) → R03 (ngoài tháng) → R01 (trùng id).
-    Với id trùng, giữ bản có transaction_ts sớm nhất (hòa thì theo giá trị các cột), các bản
-    còn lại bị gắn R01.
+    Thứ tự xét: R01 (id rỗng) → R02 (amount, date) → R03 (ngoài tháng) → R01 (id đã có ở tháng
+    khác) → R01 (trùng id trong tháng). Với id trùng trong tháng, giữ bản có transaction_ts sớm
+    nhất (hòa thì theo giá trị các cột), các bản còn lại bị gắn R01.
+
+    other_ids: DataFrame có cột transaction_id gồm các id đã có trong Silver ở tháng khác; bản
+    trong batch bị gắn R01, tức là bản nạp trước được giữ. None thì không xét.
     """
     start, end = (F.lit(d).cast("timestamp_ntz") for d in h.month_bounds(month))
+    parsed = b.select("*",
+                      to_num(F.col("id"), "bigint").alias("_id"),
+                      parse_ts(F.col("date")).alias("_ts"),
+                      parse_money(F.col("amount")).alias("_amount"))
+    if other_ids is None:
+        parsed = parsed.withColumn("_other", F.lit(False))
+    else:
+        # Chỉ quét cột id của Silver, giữ lại các id có trong batch (batch nhỏ nên broadcast)
+        ids = parsed.select("_id").where(F.col("_id").isNotNull()).distinct()
+        dup = (other_ids.select(F.col("transaction_id").alias("_id"))
+                        .join(F.broadcast(ids), "_id", "left_semi").distinct()
+                        .withColumn("_other", F.lit(True)))
+        parsed = (parsed.join(F.broadcast(dup), "_id", "left")
+                        .withColumn("_other", F.coalesce(F.col("_other"), F.lit(False))))
     rule = (F.when(F.col("_id").isNull(), _rule("R01", "transaction_id rỗng hoặc không phải số"))
              .when(F.col("_amount").isNull(), _rule("R02", "amount không parse được"))
              .when(F.col("_ts").isNull(), _rule("R02", "date không parse được"))
              .when((F.col("_ts") < start) | (F.col("_ts") >= end),
-                   _rule("R03", f"transaction_ts ngoài tháng {month}")))
+                   _rule("R03", f"transaction_ts ngoài tháng {month}"))
+             .when(F.col("_other"), _rule("R01", "transaction_id đã có ở tháng khác")))
     # Chỉ các dòng chưa vi phạm mới "tranh" nhau giữ một transaction_id
     w = Window.partitionBy("_id", F.col("_rule").isNull()).orderBy("_ts", *h.TXN_COLS)
-    return (b.select("*",
-                     to_num(F.col("id"), "bigint").alias("_id"),
-                     parse_ts(F.col("date")).alias("_ts"),
-                     parse_money(F.col("amount")).alias("_amount"))
-             .withColumn("_rule", rule)
-             .withColumn("_rule", F.when(F.col("_rule").isNull() & (F.row_number().over(w) > 1),
-                                         _rule("R01", "trùng transaction_id"))
-                                   .otherwise(F.col("_rule"))))
+    return (parsed.withColumn("_rule", rule)
+                  .withColumn("_rule", F.when(F.col("_rule").isNull() & (F.row_number().over(w) > 1),
+                                              _rule("R01", "trùng transaction_id"))
+                                        .otherwise(F.col("_rule")))
+                  .drop("_other"))
 
 
 def split_marked(marked, bronze_cols):
@@ -187,9 +202,9 @@ def split_marked(marked, bronze_cols):
     return valid, quarantine
 
 
-def split_batch(b, month):
+def split_batch(b, month, other_ids=None):
     """Tách batch Bronze tháng M thành (valid, quarantine); valid dùng cho transactions()."""
-    return split_marked(mark_batch(b, month), b.columns)
+    return split_marked(mark_batch(b, month, other_ids), b.columns)
 
 
 def transactions(valid):

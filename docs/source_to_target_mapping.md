@@ -82,26 +82,34 @@ Mỗi cột nguồn đi qua Bronze, Silver, Gold như thế nào, biến đổi 
 
 | Rule | Chạy ở | Dữ liệu kiểm tra |
 |---|---|---|
-| R10 | Bronze (sau extract) và Silver | Số dòng tháng M ở nguồn = bronze; bronze = silver + quarantine |
-| R01–R03 | Silver | Bản ghi vi phạm đưa vào ops.pipeline.quarantine_transactions |
-| R04–R09, R12, R14 | Silver | Ghi vào ops.pipeline.dq_results; WARN thành BLOCK khi tỷ lệ vi phạm > 1% |
+| R10.1 | Bronze (task reconcile_src_bronze) | Số dòng tháng M đếm lại ở nguồn = bronze |
+| R10.2 | Silver (job Silver, sau MERGE) | bronze = silver + quarantine của tháng M |
+| R01–R03 | Silver | Bản ghi vi phạm đưa vào ops.pipeline.quarantine_transactions; số lượng ghi vào ops.pipeline.dq_results |
+| R04–R08, R14 | Silver (task dq_silver) | Ghi vào ops.pipeline.dq_results |
+| R12 | Silver (task dq_silver) | Số giao dịch và tổng tiền của tháng so với 12 tháng trước; chỉ cảnh báo |
+| R09 | Silver tham chiếu (dag_reference) | credit_score, num_credit_cards trên silver.card.customers |
+| I01 | Silver (merchants) | Merchant nhiều vị trí; chỉ ghi nhận |
 | R11 | Gold | silver = fact theo số dòng và tổng amount của tháng |
 | R13 | dag_maintenance | Quét toàn bộ bucket bronze, silver, gold, ops tìm số thẻ đầy đủ |
 
+Rule xét từng bản ghi (R01–R09, R14) bị nâng thành BLOCK khi tỷ lệ vi phạm của batch vượt 1%. Quy ước trạng thái ở [data_model.md](data_model.md) mục 4.
+
 ## Kiểm chứng rule
 
-Dữ liệu gốc gần như sạch, nên cơ chế cách ly và BLOCK được kiểm chứng bằng pytest trên bộ dữ liệu mẫu nhỏ có lỗi cố ý (`tests/fixtures/`, tuần 6). Trên dữ liệu thật, rule phải báo đúng các vi phạm mà profiling đã đếm.
+Dữ liệu gốc gần như sạch, nên cơ chế cách ly và BLOCK được kiểm chứng bằng pytest ([test_dq_rules.py](../tests/test_dq_rules.py)) trên bộ dữ liệu mẫu nhỏ có lỗi cố ý (`tests/fixtures/dq_*.csv`, cột `_expect` ghi rule mà từng dòng vi phạm). Trên dữ liệu thật, rule phải báo đúng các vi phạm mà profiling đã đếm.
 
 | Rule | Lỗi cố ý trong fixture | Kết quả mong đợi (fixture) | Trên dữ liệu thật |
 |---|---|---|---|
-| R01 | Trùng transaction_id | Bản trùng vào quarantine | 0 |
+| R01 | id rỗng, không phải số; trùng trong tháng; trùng với tháng khác đã có trong Silver | Vào quarantine | 0 |
 | R02 | amount `N/A`, `$12,30.5`; date không parse được | Vào quarantine | 0 |
 | R03 | transaction_ts ngoài tháng của batch | Vào quarantine | 0 |
 | R04 | client_id / card_id không tồn tại | Giữ lại, key = −1 | 0 |
 | R05 | Thẻ không thuộc khách hàng | Ghi nhận | 0 |
 | R06 | mcc không có trong mcc_codes | Giữ lại, mcc_key = −1 | 0 |
-| R07 | Kênh lạ; Chip với city = ONLINE | Ghi nhận | **5.788** |
+| R07 | Kênh lạ; Chip với city = ONLINE; Online với city khác ONLINE | Ghi nhận | **5.788** |
 | R08 | Thẻ has_chip = NO có giao dịch Chip | Ghi nhận | 0 |
-| R09 | credit_score ngoài [300, 850] | Ghi nhận | 0 |
+| R09 | credit_score ngoài [300, 850]; num_credit_cards khác số thẻ thực tế | Ghi nhận | 0 |
+| R10 | (đối soát số dòng) | – | 0 tháng lệch |
+| R12 | Chuỗi 12 tháng tổng hợp sẵn, tháng cuối lệch > 3σ (test riêng, không dùng fixture) | Cảnh báo | **1 tháng**: 2019-02, tổng tiền z = −3,08 |
 | R14 | Giao dịch trước ngày mở thẻ / sau ngày hết hạn | Ghi nhận | **392** (309 + 83) |
-| Nâng WARN → BLOCK | Tỷ lệ vi phạm WARN > 1% | DAG dừng | – |
+| Nâng thành BLOCK | Tỷ lệ vi phạm > 1% (fixture có tỷ lệ lỗi rất cao) | dq_silver thất bại, DAG dừng | Không tháng nào (R07 cao nhất 0,12%) |
