@@ -7,10 +7,11 @@ PY := $(UV) python
 SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
 SPARK := $(COMPOSE) exec -T airflow-scheduler python /opt/airflow/spark
 TRINO := $(COMPOSE) exec -T trino trino --output-format ALIGNED --execute
+BLOCK_RATIO_ARG = $(if $(BLOCK_RATIO),--block-ratio $(BLOCK_RATIO))
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status storage-status demo erase test
+.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status storage-status demo erase test
 
 help: ## Liệt kê các lệnh
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
@@ -31,12 +32,17 @@ secrets: ## In các khóa ngẫu nhiên để dán vào .env
 	  SUPERSET_DB_PASSWORD SOURCE_DB_PASSWORD AIRFLOW_ADMIN_PASSWORD SUPERSET_ADMIN_PASSWORD; do \
 	  echo "$$v=$$(openssl rand -hex 12)"; done
 
+# up/up-core không build lại: dùng image đã có, image nào chưa có (máy sạch) thì compose tự build.
+# Sửa Dockerfile hoặc đổi phiên bản trong x-spark-build-args thì chạy make build.
+build: ## Build lại image Spark, Airflow, Superset (sau khi sửa Dockerfile hoặc đổi phiên bản)
+	$(COMPOSE) --profile bi build
+
 up: env ## Khởi động toàn bộ dịch vụ (core + bi)
-	$(COMPOSE) --profile bi up -d --build --wait
+	$(COMPOSE) --profile bi up -d --wait
 	@$(MAKE) --no-print-directory ps
 
 up-core: env ## Khởi động không có Superset (máy ít RAM, khi backfill)
-	$(COMPOSE) up -d --build --wait
+	$(COMPOSE) up -d --wait
 	@$(MAKE) --no-print-directory ps
 
 down: ## Dừng dịch vụ, giữ dữ liệu
@@ -102,13 +108,13 @@ bronze-status: ## Số dòng các bảng Bronze và 10 lần nạp gần nhất
 silver-ref: ## Bronze → Silver cho customers, cards, mcc_codes
 	$(SPARK)/transform/silver_reference.py
 
-silver: ## Silver giao dịch một tháng rồi cập nhật merchants: make silver MONTH=2019-03
+silver: ## Silver giao dịch một tháng rồi cập nhật merchants: make silver MONTH=2019-03 [BLOCK_RATIO=0.01]
 	@test -n "$(MONTH)" || (echo "Thiếu MONTH, VD: make silver MONTH=2019-03"; exit 1)
-	$(SPARK)/transform/silver_transactions.py --month $(MONTH)
+	$(SPARK)/transform/silver_transactions.py --month $(MONTH) $(BLOCK_RATIO_ARG)
 
 silver-range: ## Silver nhiều tháng rồi merchants: make silver-range FROM=2010-01 TO=2019-10
 	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make silver-range FROM=2010-01 TO=2019-10"; exit 1)
-	$(SPARK)/transform/silver_transactions.py --from $(FROM) --to $(TO)
+	$(SPARK)/transform/silver_transactions.py --from $(FROM) --to $(TO) $(BLOCK_RATIO_ARG)
 
 silver-merchants: ## Tính lại silver.card.merchants từ silver.card.transactions
 	$(SPARK)/transform/silver_merchants.py
@@ -120,6 +126,34 @@ silver-status: ## Số dòng 5 bảng Silver và số bản ghi bị cách ly th
 	  UNION ALL SELECT 'mcc_codes', count(*) FROM silver.card.mcc_codes \
 	  UNION ALL SELECT 'merchants', count(*) FROM silver.card.merchants; \
 	  SELECT rule_id, count(*) AS n, count(DISTINCT _batch_id) AS n_batches FROM ops.pipeline.quarantine_transactions GROUP BY rule_id"
+
+dq: ## Rule DQ một tháng (R10, R01–R03, R04–R08, R12, R14), dừng nếu BLOCK: make dq MONTH=2019-03 [BLOCK_RATIO=0.01]
+	@test -n "$(MONTH)" || (echo "Thiếu MONTH, VD: make dq MONTH=2019-03"; exit 1)
+	$(SPARK)/quality/reconcile.py src-bronze --month $(MONTH)
+	$(SPARK)/quality/reconcile.py bronze-silver --month $(MONTH) $(BLOCK_RATIO_ARG)
+	$(SPARK)/quality/rules.py transactions --month $(MONTH) $(BLOCK_RATIO_ARG)
+
+dq-range: ## Rule DQ nhiều tháng trong một session: make dq-range FROM=2010-01 TO=2019-10
+	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make dq-range FROM=2010-01 TO=2019-10"; exit 1)
+	$(SPARK)/quality/reconcile.py src-bronze --from $(FROM) --to $(TO)
+	$(SPARK)/quality/reconcile.py bronze-silver --from $(FROM) --to $(TO) $(BLOCK_RATIO_ARG)
+	$(SPARK)/quality/rules.py transactions --from $(FROM) --to $(TO) $(BLOCK_RATIO_ARG)
+
+dq-ref: ## Rule DQ trên bảng tham chiếu (R09)
+	$(SPARK)/quality/rules.py reference $(BLOCK_RATIO_ARG)
+
+dq-status: ## Tổng hợp kết quả mới nhất của từng rule và các batch có WARN/BLOCK gần nhất
+	$(TRINO) "WITH latest AS (SELECT batch_id, rule_id, max_by(severity, created_at) AS severity, \
+	    max_by(status, created_at) AS status, max_by(failed_count, created_at) AS failed_count \
+	    FROM ops.pipeline.dq_results GROUP BY batch_id, rule_id) \
+	  SELECT rule_id, severity, count(*) AS batches, sum(failed_count) AS failed, \
+	    count_if(status = 'WARN') AS warn, count_if(status = 'BLOCK') AS block FROM latest \
+	    GROUP BY rule_id, severity ORDER BY rule_id; \
+	  WITH latest AS (SELECT batch_id, rule_id, max_by(status, created_at) AS status, \
+	    max_by(failed_count, created_at) AS failed_count, max_by(checked_count, created_at) AS checked_count, \
+	    max_by(details, created_at) AS details FROM ops.pipeline.dq_results GROUP BY batch_id, rule_id) \
+	  SELECT batch_id, rule_id, status, failed_count, checked_count, details FROM latest \
+	    WHERE status IN ('WARN', 'BLOCK') ORDER BY batch_id DESC, rule_id LIMIT 15"
 
 storage-status: ## Dung lượng từng tầng: vật lý (mc du) và dữ liệu đang dùng (snapshot hiện tại)
 	@echo "Dung lượng vật lý của bucket (gồm snapshot cũ, file mồ côi, metadata):"

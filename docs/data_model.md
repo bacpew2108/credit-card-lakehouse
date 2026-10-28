@@ -1,4 +1,4 @@
-# Mô hình dữ liệu (tuần 3, cập nhật tuần 5)
+# Mô hình dữ liệu
 
 Đặc tả cột của các tầng Bronze, Silver, Gold và tầng vận hành `ops`, chi tiết hóa mục 5 và Hình 3–4 của Design Doc. Tuần 4–7 code theo tài liệu này; khi có thay đổi thì sửa ở đây trước.
 
@@ -45,7 +45,7 @@ Mọi cột nghiệp vụ đều là `string`, giữ nguyên giá trị nguồn 
 
 Mọi bảng Silver có thêm `_batch_id string` (batch nạp gần nhất) và `_updated_at timestamp`.
 
-Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới và bảng hiện có (full outer join theo khóa), rồi `MERGE INTO` chỉ các dòng thêm/sửa/xóa. Vì vậy `_updated_at` chỉ đổi khi dòng thực sự đổi, và chạy lại khi Bronze không đổi thì không tạo snapshot mới. Silver chỉ đọc batch Bronze có lần nạp gần nhất là SUCCESS trong `ops.pipeline.ingestion_log`. Mọi phép parse dùng `try_cast` sau khi kiểm tra định dạng bằng regex, vì Spark 4 bật ANSI mode (ép kiểu sai làm dừng cả job). Iceberg không có kiểu `smallint`: các cột ghi `smallint` dưới đây được lưu thành `int`.
+Cách ghi: job tính phần chênh lệch giữa dữ liệu mới và bảng hiện có (full outer join theo khóa), rồi `MERGE INTO` chỉ các dòng thêm/sửa/xóa. Vì vậy `_updated_at` chỉ đổi khi dòng thực sự đổi, và chạy lại khi Bronze không đổi thì không tạo snapshot mới. Silver chỉ đọc batch Bronze có lần nạp gần nhất là SUCCESS trong `ops.pipeline.ingestion_log`. Mọi phép parse dùng `try_cast` sau khi kiểm tra định dạng bằng regex, vì Spark 4 bật ANSI mode (ép kiểu sai làm dừng cả job). Iceberg không có kiểu `smallint`: các cột ghi `smallint` dưới đây được lưu thành `int`.
 
 ### silver.card.customers (khóa `customer_id`)
 
@@ -103,7 +103,7 @@ Cách ghi (tuần 5): job tính phần chênh lệch giữa dữ liệu mới v�
 | is_online | boolean | channel = Online |
 | is_foreign | boolean | merchant_state không NULL và không phải mã bang 2 ký tự |
 
-Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.pipeline.quarantine_transactions`. Thứ tự xét: R01 (id rỗng hoặc không phải số) → R02 (amount, date không parse được) → R03 (ngoài tháng của batch) → R01 (trùng id: giữ bản có `transaction_ts` sớm nhất). Sau mỗi tháng job đối soát R10 vế 2: bronze = silver + quarantine.
+Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops.pipeline.quarantine_transactions`. Thứ tự xét: R01 (id rỗng hoặc không phải số) → R02 (amount, date không parse được) → R03 (ngoài tháng của batch) → R01 (id đã có trong Silver ở tháng khác: bản nạp trước được giữ) → R01 (trùng id trong tháng: giữ bản có `transaction_ts` sớm nhất). Sau mỗi tháng job ghi số bản ghi bị cách ly theo R01–R03 và đối soát R10.2 (bronze = silver + quarantine) vào `ops.pipeline.dq_results`.
 
 ### silver.card.merchants (khóa `merchant_id`, suy ra từ silver.card.transactions)
 
@@ -112,7 +112,7 @@ Bản ghi vi phạm rule BLOCK (R01–R03) không vào bảng này mà vào `ops
 | merchant_id | int | |
 | merchant_city, merchant_state, zip | string | Vị trí xuất hiện nhiều nhất của merchant; hòa thì lấy vị trí có giao dịch gần nhất, rồi theo thứ tự chữ cái |
 | is_online, is_foreign | boolean | Theo vị trí đã chọn |
-| location_count | int | Số vị trí khác nhau. Lớn hơn 1 ở 21,6% merchant và được ghi vào DQ |
+| location_count | int | Số vị trí khác nhau. Lớn hơn 1 ở 21,6% merchant, ghi vào `ops.pipeline.dq_results` với rule I01 (chỉ ghi nhận) |
 | txn_count | bigint | |
 
 MCC không giữ ở đây (456 merchant có 2 MCC) mà giữ ở fact.
@@ -191,6 +191,19 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 | Bảng | Cột | Ghi bởi |
 |---|---|---|
 | ops.pipeline.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
-| ops.pipeline.dq_results | run_id, batch_id, rule_id, severity, checked_count, failed_count, failed_ratio, status (PASS / WARN / BLOCK), created_at | Job Silver, R13 |
-| ops.pipeline.quarantine_transactions | Các cột của bronze.card.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver (tuần 5) |
+| ops.pipeline.dq_results | run_id, batch_id, rule_id, severity (BLOCK / WARN / INFO), checked_count, failed_count, failed_ratio (double), status (PASS / WARN / BLOCK / INFO), details, created_at | `reconcile.py` (R10), job Silver (R01–R03, I01), `rules.py` (R04–R09, R12, R14), R13. Chỉ ghi thêm: một dòng cho mỗi (lần chạy, batch, rule) |
+| ops.pipeline.quarantine_transactions | Các cột của bronze.card.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver |
 | ops.pipeline.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
+
+### Quy ước của ops.pipeline.dq_results
+
+- `batch_id` là tháng (`2019-03`) với rule giao dịch, `ref_YYYYMMDD` với R09. `rule_id` theo mục 6 Design Doc; R10 tách thành **R10.1** (số dòng nguồn = bronze) và **R10.2** (bronze = silver + quarantine). **I01** là chỉ số thông tin: merchant có nhiều vị trí.
+- `severity` là mức của rule: BLOCK (R01–R03, R10, R11, R13), WARN (R04–R09, R12, R14), INFO (I01).
+- `status` là kết quả của batch:
+  - PASS: không có vi phạm.
+  - WARN: có vi phạm nhưng batch đi tiếp. Với R01–R03, các bản ghi vi phạm đã nằm trong quarantine.
+  - BLOCK: dừng DAG. Đối soát R10 lệch dù chỉ một dòng; hoặc rule xét từng bản ghi (R01–R09, R14) có `failed_ratio` vượt ngưỡng (mặc định 1%, tham số `--block-ratio` hoặc biến `DQ_BLOCK_RATIO`).
+  - INFO: chỉ ghi nhận, không chặn.
+- R12 xét theo tháng: `checked_count` = 1, `failed_count` = 1 khi số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng liền trước; chưa đủ 12 tháng thì `checked_count` = 0. R12 chỉ cảnh báo, không nâng thành BLOCK.
+- `details` ghi số vi phạm theo từng điều kiện khi rule có nhiều điều kiện (VD R14: `trước tháng mở thẻ: 1; sau tháng hết hạn: 0`), lý do cách ly với R01–R03, số dòng hai vế với R10, z-score với R12.
+- Kết quả có hiệu lực của một rule trong một batch là dòng mới nhất (`max_by(status, created_at)`). Task `dq_silver` của `dag_monthly` dừng DAG khi kết quả có hiệu lực của bất kỳ rule nào trong tháng là BLOCK.

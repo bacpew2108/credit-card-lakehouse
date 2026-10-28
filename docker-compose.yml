@@ -332,10 +332,12 @@ services:
       <<: *airflow-env
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    # Pool spark 1 slot: các task Spark của mọi DAG chạy lần lượt (cụm Spark nhỏ, giới hạn RAM)
     command: >
       bash -c "airflow db migrate &&
       airflow users create --username $${_AIRFLOW_WWW_USER_USERNAME} --password $${_AIRFLOW_WWW_USER_PASSWORD}
-      --firstname Admin --lastname User --role Admin --email admin@example.com"
+      --firstname Admin --lastname User --role Admin --email admin@example.com &&
+      airflow pools set spark 1 'Job Spark qua Spark Connect, chạy lần lượt'"
     depends_on:
       postgres-meta:
         condition: service_healthy

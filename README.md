@@ -41,9 +41,14 @@ make bronze-status
 make silver-ref                               # customers, cards, mcc_codes → Silver
 make silver-range FROM=2010-01 TO=2019-10     # giao dịch → Silver (MERGE theo tháng, cách ly R01–R03) + merchants
 make silver-status
+make dq-ref                                   # R09 trên khách hàng, thẻ
+make dq-range FROM=2010-01 TO=2019-10         # R10, R01–R03, R04–R08, R12, R14 → ops.pipeline.dq_results (make dq MONTH=… cho một tháng)
+make dq-status
 ```
 
-Lần đầu `make up` phải build image Spark (tải PySpark ~430 MB) và image Airflow, mất vài phút. Những lần sau khởi động trong khoảng 35 giây.
+Các bước trên cũng chạy được bằng Airflow: `dag_reference` (thủ công) và `dag_monthly` (mỗi lần chạy một tháng, đến Silver và DQ). Xem [docs/week6.md](docs/week6.md).
+
+Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow và Superset, mất vài phút. Những lần sau `make up` dùng lại image đã build, không build lại, và khởi động trong khoảng 35 giây. Sau khi sửa Dockerfile trong `infra/` hoặc đổi phiên bản trong `x-spark-build-args` thì chạy `make build`.
 
 | Dịch vụ | URL |
 |---|---|
@@ -82,17 +87,17 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── data/raw/             # bộ dữ liệu Kaggle (không commit)
 ├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
-│   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, ingestion_log, MERGE)
+│   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, bảng ops, MERGE)
 │   ├── extract/          # extract_jdbc.py, load_files.py
 │   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv); gold_*.py, marts.py (tuần 7)
-│   ├── quality/          # rules.py, reconcile.py, pan_scan.py (tuần 6, 8)
+│   ├── quality/          # rules.py (rule DQ, dq_results), reconcile.py (R10); pan_scan.py (tuần 8)
 │   └── maintenance/      # storage_report.py; iceberg_maintenance.py, erase_customer.py (tuần 8–10)
-├── airflow/dags/         # dag_smoke_test; dag_reference, dag_monthly (tuần 6), dag_rebuild, dag_maintenance
+├── airflow/dags/         # dag_smoke_test, dag_reference, dag_monthly; dag_rebuild, dag_maintenance (tuần 8)
 ├── sql/                  # truy vấn Q1–Q10, demo Iceberg (tuần 11)
-├── tests/                # pytest
+├── tests/                # pytest; fixtures/ dữ liệu mẫu có lỗi cố ý cho rule DQ
 └── docs/
     ├── profiling/        # báo cáo profiling tuần 1
-    ├── week2.md … week5.md  # tổng kết từng tuần
+    ├── week2.md … week6.md  # tổng kết từng tuần
     ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
     ├── source_to_target_mapping.md
     └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
@@ -107,7 +112,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 3 | Nguồn giả lập, thiết kế | Xong. Xem [docs/week3.md](docs/week3.md) |
 | 4 | Bronze | Xong. Xem [docs/week4.md](docs/week4.md) |
 | 5 | Silver | Xong. Xem [docs/week5.md](docs/week5.md) |
-| 6 | Data quality, Airflow (1) | Tiếp theo |
+| 6 | Data quality, Airflow (1) | Xong. Xem [docs/week6.md](docs/week6.md) |
+| 7 | Gold | Tiếp theo |
 
 ## Bảo mật
 

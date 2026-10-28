@@ -1,0 +1,6 @@
+_expect,id,current_age,retirement_age,birth_year,birth_month,gender,address,latitude,longitude,per_capita_income,yearly_income,total_debt,credit_score,num_credit_cards
+,1,40,65,1979,1,Male,1 Fixture St,40.0000,-80.0000,$20000,$40000,$10000,700,2
+R09,2,35,65,1984,5,Female,2 Fixture St,41.0000,-81.0000,$25000,$50000,$5000,900,1
+R09,3,50,67,1969,7,Male,3 Fixture St,42.0000,-82.0000,$30000,$60000,$0,650,3
+R09,4,28,65,1991,2,Female,4 Fixture St,43.0000,-83.0000,$15000,$30000,$1000,299,0
+,5,60,65,1959,9,Male,5 Fixture St,44.0000,-84.0000,$18000,$36000,$2000,810,1

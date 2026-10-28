@@ -27,6 +27,16 @@ def test_iter_months_covers_whole_dataset():
         h.iter_months("2019-03", "2019-02")
 
 
+def test_add_months_and_month_scope():
+    assert h.add_months("2019-03", -12) == "2018-03"
+    assert h.add_months("2019-01", -1) == "2018-12"
+    assert h.add_months("2018-12", 1) == "2019-01"
+    assert h.add_months("2010-01", 0) == "2010-01"
+    assert h.month_scope("2019-12").format(t="t.") == (
+        "t.transaction_ts >= TIMESTAMP_NTZ '2019-12-01 00:00:00' "
+        "AND t.transaction_ts < TIMESTAMP_NTZ '2020-01-01 00:00:00'")
+
+
 def test_resolve_months_accepts_one_form_only():
     ap = argparse.ArgumentParser()
     h.add_month_args(ap)

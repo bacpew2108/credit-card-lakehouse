@@ -21,18 +21,18 @@ MCC_GROUPS = Path(__file__).resolve().parent / "ref" / "mcc_groups.csv"
 TABLES = {
     # bảng Silver: (bảng Bronze, nguồn trong ingestion_log, khóa, DDL các cột nghiệp vụ,
     #              hàm (spark, df Bronze) → (df Silver, các cột))
-    "silver.card.customers": (h.BRONZE_CUSTOMERS, h.SRC_CUSTOMERS, "customer_id", """
+    h.SILVER_CUSTOMERS: (h.BRONZE_CUSTOMERS, h.SRC_CUSTOMERS, "customer_id", """
         customer_id INT, current_age SMALLINT, retirement_age SMALLINT, birth_year SMALLINT,
         birth_month SMALLINT, gender STRING, address STRING, latitude DOUBLE, longitude DOUBLE,
         per_capita_income DECIMAL(12,2), yearly_income DECIMAL(12,2), total_debt DECIMAL(12,2),
         debt_to_income DECIMAL(6,3), credit_score SMALLINT, num_credit_cards SMALLINT""",
         lambda spark, b: (st.customers(b), st.CUSTOMER_COLS)),
-    "silver.card.cards": (h.BRONZE_CARDS, h.SRC_CARDS, "card_id", """
+    h.SILVER_CARDS: (h.BRONZE_CARDS, h.SRC_CARDS, "card_id", """
         card_id INT, customer_id INT, card_brand STRING, card_type STRING, card_token STRING,
         card_bin STRING, card_last4 STRING, expires_date DATE, acct_open_date DATE, has_chip BOOLEAN,
         num_cards_issued SMALLINT, credit_limit DECIMAL(12,2), year_pin_last_changed SMALLINT""",
         lambda spark, b: (st.cards(b), st.CARD_COLS)),
-    "silver.card.mcc_codes": (h.BRONZE_MCC, h.SRC_MCC, "mcc_code", """
+    h.SILVER_MCC: (h.BRONZE_MCC, h.SRC_MCC, "mcc_code", """
         mcc_code INT, description STRING, mcc_group STRING""",
         lambda spark, b: (st.mcc_codes(b, mcc_groups_df(spark)), st.MCC_COLS)),
 }
@@ -56,7 +56,7 @@ def main():
             total = spark.table(table).count()
             print(f"[silver] {table} ← {bronze} ({batch_id}): {total} dòng; "
                   f"thêm {counts['I']}, sửa {counts['U']}, xóa {counts['D']}")
-        unmapped = spark.table("silver.card.mcc_codes").where("mcc_group = 'Chưa phân nhóm'").count()
+        unmapped = spark.table(h.SILVER_MCC).where("mcc_group = 'Chưa phân nhóm'").count()
         if unmapped:
             print(f"[cảnh báo] {unmapped} mã MCC chưa có trong {MCC_GROUPS.name}")
     finally:
