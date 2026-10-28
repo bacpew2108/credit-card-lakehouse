@@ -1,54 +1,21 @@
 """Kiểm thử rule chất lượng dữ liệu (spark/quality/rules.py) trên dữ liệu mẫu có lỗi cố ý.
 
 Mỗi dòng trong tests/fixtures/dq_*.csv ghi rule mà nó cố ý vi phạm ở cột _expect (rỗng là dòng
-sạch). Fixture được dựng thành Silver như job thật, rồi test khẳng định mọi dòng lỗi bị đúng rule
-đó bắt (R01–R03 vào quarantine, rule WARN được ghi nhận) và dòng sạch không bị rule nào bắt.
+sạch). Fixture fx (conftest.py) dựng dữ liệu mẫu thành Silver như job thật, rồi test khẳng định mọi
+dòng lỗi bị đúng rule đó bắt (R01–R03 vào quarantine, rule WARN được ghi nhận) và dòng sạch không
+bị rule nào bắt.
 """
 
-import csv
 from collections import Counter
-from pathlib import Path
-from types import SimpleNamespace
+from datetime import datetime
 
 import pytest
 
 pytest.importorskip("pyspark")
 from common import helpers as h  # noqa: E402
 from quality import rules as dq  # noqa: E402
-from transform import silver_transforms as st  # noqa: E402
-from transform.silver_reference import mcc_groups_df  # noqa: E402
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-MONTH = "2019-03"
-OTHER_MONTH_IDS = [900]     # id đã có trong Silver ở tháng khác: bản trong batch bị R01
 RECORD_RULES = {r for r, rule in dq.RULES.items() if rule.per_record}
-
-
-def read_fixture(name):
-    """Các dòng của file fixture; ô rỗng là NULL như ở nguồn."""
-    with (FIXTURES / name).open(encoding="utf-8", newline="") as f:
-        return [{k: v or None for k, v in r.items()} for r in csv.DictReader(f)]
-
-
-def to_bronze(spark, rows, cols, extra="", extra_values=lambda i: ()):
-    schema = ", ".join(f"{c} string" for c in cols) + extra
-    return spark.createDataFrame([tuple(r[c] for c in cols) + extra_values(i) for i, r in enumerate(rows)], schema)
-
-
-@pytest.fixture(scope="module")
-def fx(spark):
-    """Fixture dựng thành Silver: bảng tham chiếu qua hàm Silver, giao dịch qua cách ly rồi Silver."""
-    cust_rows, txn_rows = read_fixture("dq_customers.csv"), read_fixture("dq_transactions.csv")
-    customers = st.customers(to_bronze(spark, cust_rows, h.CUSTOMER_COLS))
-    cards = st.cards(to_bronze(spark, read_fixture("dq_cards.csv"), h.CARD_COLS))
-    mccs = st.mcc_codes(to_bronze(spark, read_fixture("dq_mcc_codes.csv"), h.MCC_COLS), mcc_groups_df(spark))
-    bronze = to_bronze(spark, txn_rows, h.TXN_COLS, ", _batch_id string, _row int", lambda i: (MONTH, i))
-    other = spark.createDataFrame([(i,) for i in OTHER_MONTH_IDS], "transaction_id bigint")
-    valid, quarantine = st.split_batch(bronze, MONTH, other)
-    return SimpleNamespace(customers=customers, cards=cards, mccs=mccs, bronze=bronze, valid=valid,
-                           quarantine=quarantine, silver=st.transactions(valid),
-                           txn_expect=[r["_expect"] or "" for r in txn_rows],
-                           cust_expect={int(r["id"]): r["_expect"] or "" for r in cust_rows})
 
 
 def test_fixture_covers_every_record_rule(fx):
@@ -112,6 +79,21 @@ def test_decide(rule_id, checked, failed, ratio, status):
     got_ratio, got_status = dq.decide(rule_id, checked, failed, ratio)
     assert got_status == status
     assert got_ratio == (failed / checked if checked else None)
+
+
+def test_blocked_uses_latest_result_and_skips_gold_rules(spark, monkeypatch):
+    """Chỉ kết quả mới nhất của rule có hiệu lực; với SILVER_RULES (dq_silver, Gold) R11 không chặn."""
+    rows = [("2019-03", "R07", "BLOCK", 1), ("2019-03", "R07", "PASS", 2),     # đã sửa: hết chặn
+            ("2019-03", "R11", "BLOCK", 3),
+            ("2019-04", "R10.2", "PASS", 1), ("2019-04", "R10.2", "BLOCK", 2)]
+    spark.createDataFrame([(b, r, s, datetime(2026, 10, 28, 0, m)) for b, r, s, m in rows],
+                          "batch_id string, rule_id string, status string, created_at timestamp") \
+         .createOrReplaceTempView("dq_results_test")
+    monkeypatch.setattr(dq.lh, "DQ_TABLE", "dq_results_test")
+    months = ["2019-03", "2019-04"]
+    assert dq.blocked_batches(spark, months) == {"2019-03": ["R11"], "2019-04": ["R10.2"]}
+    assert dq.blocked_batches(spark, months, dq.SILVER_RULES) == {"2019-04": ["R10.2"]}
+    assert dq.blocked_rules(spark, "2019-03", dq.SILVER_RULES) == []
 
 
 def test_r12_three_sigma_against_previous_12_months():

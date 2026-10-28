@@ -1,11 +1,13 @@
-"""dag_monthly: luồng xử lý một tháng giao dịch (mục 8 và Hình 5 Design Doc), đến lớp Silver.
+"""dag_monthly: luồng xử lý một tháng giao dịch (mục 8 và Hình 5 Design Doc), từ nguồn đến Gold.
 
 check_source_month → extract_to_bronze → reconcile_src_bronze → silver_transform → dq_silver
+→ gold_build → refresh_marts → reconcile_silver_gold
 
 Mỗi lần chạy xử lý tháng M = data_interval_start (CronDataIntervalTimetable: lần chạy của
 tháng M bắt đầu sau khi tháng M kết thúc). Tham số month chạy lại một tháng bất kỳ khi trigger
 thủ công. Mọi task idempotent: Bronze bỏ qua tháng đã nạp (force để nạp lại), Silver chỉ MERGE
-phần thay đổi. dq_silver thất bại khi có rule BLOCK, các task sau (Gold, tuần 7) không chạy.
+phần thay đổi, fact và mart ghi đè đúng partition của tháng. dq_silver thất bại khi có rule
+BLOCK, nên Gold không được dựng; reconcile_silver_gold thất bại khi R11 lệch.
 """
 
 from datetime import datetime, timedelta
@@ -66,4 +68,19 @@ with DAG(
         retries=0,                       # BLOCK là kết quả, chạy lại không đổi
     )
 
-    check_source_month >> extract_to_bronze >> reconcile_src_bronze >> silver_transform >> dq_silver
+    gold_build = BashOperator(
+        task_id="gold_build",
+        bash_command=f"{JOB}/transform/gold_fact.py --month {MONTH}",
+    )
+    refresh_marts = BashOperator(
+        task_id="refresh_marts",
+        bash_command=f"{JOB}/transform/marts.py --month {MONTH}",
+    )
+    reconcile_silver_gold = BashOperator(
+        task_id="reconcile_silver_gold",
+        bash_command=f"{JOB}/quality/reconcile.py silver-gold --month {MONTH}",
+        retries=0,
+    )
+
+    (check_source_month >> extract_to_bronze >> reconcile_src_bronze >> silver_transform >> dq_silver
+     >> gold_build >> refresh_marts >> reconcile_silver_gold)

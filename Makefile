@@ -11,7 +11,7 @@ BLOCK_RATIO_ARG = $(if $(BLOCK_RATIO),--block-ratio $(BLOCK_RATIO))
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status storage-status demo erase test
+.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status gold-ref gold gold-range gold-status storage-status demo erase test
 
 help: ## Liệt kê các lệnh
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
@@ -144,9 +144,10 @@ dq-ref: ## Rule DQ trên bảng tham chiếu (R09)
 
 dq-status: ## Tổng hợp kết quả mới nhất của từng rule và các batch có WARN/BLOCK gần nhất
 	$(TRINO) "WITH latest AS (SELECT batch_id, rule_id, max_by(severity, created_at) AS severity, \
-	    max_by(status, created_at) AS status, max_by(failed_count, created_at) AS failed_count \
-	    FROM ops.pipeline.dq_results GROUP BY batch_id, rule_id) \
-	  SELECT rule_id, severity, count(*) AS batches, sum(failed_count) AS failed, \
+	    max_by(status, created_at) AS status, max_by(failed_count, created_at) AS failed_count, \
+	    max(created_at) AS created_at FROM ops.pipeline.dq_results GROUP BY batch_id, rule_id) \
+	  SELECT rule_id, severity, count(*) AS batches, \
+	    if(severity = 'INFO', max_by(failed_count, created_at), sum(failed_count)) AS failed, \
 	    count_if(status = 'WARN') AS warn, count_if(status = 'BLOCK') AS block FROM latest \
 	    GROUP BY rule_id, severity ORDER BY rule_id; \
 	  WITH latest AS (SELECT batch_id, rule_id, max_by(status, created_at) AS status, \
@@ -154,6 +155,43 @@ dq-status: ## Tổng hợp kết quả mới nhất của từng rule và các b
 	    max_by(details, created_at) AS details FROM ops.pipeline.dq_results GROUP BY batch_id, rule_id) \
 	  SELECT batch_id, rule_id, status, failed_count, checked_count, details FROM latest \
 	    WHERE status IN ('WARN', 'BLOCK') ORDER BY batch_id DESC, rule_id LIMIT 15"
+
+gold-ref: ## Gold: dim_customer, dim_card, dim_mcc, dim_date (sau silver-ref)
+	$(SPARK)/transform/gold_dimensions.py reference
+
+gold: ## Gold một tháng: dim từ giao dịch, fact, 6 mart, R11: make gold MONTH=2019-03
+	@test -n "$(MONTH)" || (echo "Thiếu MONTH, VD: make gold MONTH=2019-03"; exit 1)
+	$(SPARK)/transform/gold_fact.py --month $(MONTH)
+	$(SPARK)/transform/marts.py --month $(MONTH)
+	$(SPARK)/quality/reconcile.py silver-gold --month $(MONTH)
+
+gold-range: ## Gold nhiều tháng, mỗi bước một Spark session: make gold-range FROM=2010-01 TO=2019-10
+	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make gold-range FROM=2010-01 TO=2019-10"; exit 1)
+	$(SPARK)/transform/gold_fact.py --from $(FROM) --to $(TO)
+	$(SPARK)/transform/marts.py --from $(FROM) --to $(TO)
+	$(SPARK)/quality/reconcile.py silver-gold --from $(FROM) --to $(TO)
+
+gold-status: ## Số dòng các bảng Gold, số khóa −1 trong fact, kết quả R11 mới nhất theo tháng
+	$(TRINO) "SELECT 'dim_customer' AS tbl, count(*) AS n_rows FROM gold.card.dim_customer \
+	  UNION ALL SELECT 'dim_card', count(*) FROM gold.card.dim_card \
+	  UNION ALL SELECT 'dim_merchant', count(*) FROM gold.card.dim_merchant \
+	  UNION ALL SELECT 'dim_location', count(*) FROM gold.card.dim_location \
+	  UNION ALL SELECT 'dim_mcc', count(*) FROM gold.card.dim_mcc \
+	  UNION ALL SELECT 'dim_date', count(*) FROM gold.card.dim_date \
+	  UNION ALL SELECT 'dim_txn_profile', count(*) FROM gold.card.dim_txn_profile \
+	  UNION ALL SELECT 'fact_transaction', count(*) FROM gold.card.fact_transaction \
+	  UNION ALL SELECT 'mart_monthly_kpi', count(*) FROM gold.card.mart_monthly_kpi \
+	  UNION ALL SELECT 'mart_mcc_monthly', count(*) FROM gold.card.mart_mcc_monthly \
+	  UNION ALL SELECT 'mart_geo_monthly', count(*) FROM gold.card.mart_geo_monthly \
+	  UNION ALL SELECT 'mart_error_monthly', count(*) FROM gold.card.mart_error_monthly \
+	  UNION ALL SELECT 'mart_customer_segment_monthly', count(*) FROM gold.card.mart_customer_segment_monthly \
+	  UNION ALL SELECT 'mart_card_monthly', count(*) FROM gold.card.mart_card_monthly; \
+	  SELECT count(*) AS fact_rows, count_if(customer_key < 0) AS customer_unknown, count_if(card_key < 0) AS card_unknown, \
+	    count_if(merchant_key < 0) AS merchant_unknown, count_if(location_key < 0) AS location_unknown, \
+	    count_if(mcc_key < 0) AS mcc_unknown, count_if(txn_profile_key < 0) AS profile_unknown, \
+	    count_if(date_key < 0) AS date_unknown FROM gold.card.fact_transaction; \
+	  WITH latest AS (SELECT batch_id, max_by(status, created_at) AS status FROM ops.pipeline.dq_results \
+	    WHERE rule_id = 'R11' GROUP BY batch_id) SELECT status AS r11_status, count(*) AS months FROM latest GROUP BY status"
 
 storage-status: ## Dung lượng từng tầng: vật lý (mc du) và dữ liệu đang dùng (snapshot hiện tại)
 	@echo "Dung lượng vật lý của bucket (gồm snapshot cũ, file mồ côi, metadata):"

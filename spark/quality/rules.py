@@ -5,14 +5,16 @@
     python rules.py reference
 
 transactions: với mỗi tháng M, chạy R04–R08, R14 và R12 trên silver.card.transactions của M, ghi
-dq_results, rồi xét kết quả mới nhất của mọi rule của M (gồm R01–R03, R10 do job Silver và
-reconcile.py ghi). Có rule BLOCK thì job thoát với mã lỗi, task dq_silver thất bại và DAG dừng.
+dq_results, rồi xét kết quả mới nhất của các rule từ nguồn đến Silver của M (SILVER_RULES: gồm
+R01–R03, R10 do job Silver và reconcile.py ghi; không gồm R11 của Gold, để một lần R11 BLOCK cũ
+không chặn việc dựng lại Gold). Có rule BLOCK thì job thoát với mã lỗi, task dq_silver thất bại
+và DAG dừng.
 reference: R09 trên silver.card.customers và silver.card.cards, batch là ref_… của khách hàng.
 
 Trạng thái (status) của một rule trong một batch:
 - PASS: không có vi phạm.
 - WARN: có vi phạm nhưng batch đi tiếp. Với R01–R03, bản ghi vi phạm đã bị cách ly.
-- BLOCK: dừng DAG. Rule đối soát (R10) lệch, hoặc rule xét từng bản ghi có tỷ lệ vi phạm vượt
+- BLOCK: dừng DAG. Rule đối soát (R10, R11) lệch, hoặc rule xét từng bản ghi có tỷ lệ vi phạm vượt
   ngưỡng (--block-ratio, mặc định DQ_BLOCK_RATIO hoặc 1%).
 - INFO: chỉ ghi nhận (I01, merchant nhiều vị trí), không bao giờ chặn.
 """
@@ -52,10 +54,13 @@ RULES = {
     "R09": Rule("WARN", True, "credit_score ∈ [300, 850]; num_credit_cards khớp số thẻ thực tế"),
     "R10.1": Rule("BLOCK", False, "số dòng nguồn = bronze"),
     "R10.2": Rule("BLOCK", False, "bronze = silver + quarantine"),
+    "R11": Rule("BLOCK", False, "số dòng, tổng amount theo tháng: silver = fact = mart_monthly_kpi"),
     "R12": Rule("WARN", False, "số giao dịch và tổng tiền của tháng trong ±3σ so với 12 tháng trước"),
     "R14": Rule("WARN", True, "giao dịch nằm trong thời hạn thẻ"),
     "I01": Rule("INFO", False, "merchant có nhiều vị trí (city, state, zip)"),
 }
+# Rule từ nguồn đến Silver: dq_silver và Gold chỉ cho đi tiếp khi không rule nào trong số này BLOCK (mục 4.1)
+SILVER_RULES = tuple(r for r in RULES if r not in ("R11", "I01"))
 CHANNELS = ("Swipe", "Chip", "Online")
 DEFAULT_BLOCK_RATIO = 0.01
 
@@ -103,12 +108,22 @@ def record(spark, rid, batch_id, results, block_ratio=None):
     return {r[2]: r[7] for r in rows}
 
 
-def blocked_rules(spark, batch_id):
+def blocked_batches(spark, batch_ids, rules=None):
+    """{batch: [rule]} các batch có rule mà kết quả mới nhất là BLOCK; rules giới hạn các rule xét."""
+    df = spark.table(lh.DQ_TABLE).where(F.col("batch_id").isin(list(batch_ids)))
+    if rules is not None:
+        df = df.where(F.col("rule_id").isin(list(rules)))
+    rows = (df.groupBy("batch_id", "rule_id").agg(F.max_by("status", "created_at").alias("status"))
+              .where(F.col("status") == "BLOCK").orderBy("batch_id", "rule_id").collect())
+    out = {}
+    for r in rows:
+        out.setdefault(r.batch_id, []).append(r.rule_id)
+    return out
+
+
+def blocked_rules(spark, batch_id, rules=None):
     """Các rule mà kết quả mới nhất của batch là BLOCK."""
-    rows = (spark.table(lh.DQ_TABLE).where(F.col("batch_id") == batch_id)
-            .groupBy("rule_id").agg(F.max_by("status", "created_at").alias("status"))
-            .where(F.col("status") == "BLOCK").orderBy("rule_id").collect())
-    return [r.rule_id for r in rows]
+    return blocked_batches(spark, [batch_id], rules).get(batch_id, [])
 
 
 # ---------------------------------------------------------------- rule xét từng bản ghi
@@ -235,7 +250,7 @@ def run_transactions(spark, rid, months, block_ratio):
         results = summarize(txn_flags(txn, *ref), txn_checks())
         results.append(("R12", *r12(history, month)))
         record(spark, rid, month, results, block_ratio)
-        if b := blocked_rules(spark, month):
+        if b := blocked_rules(spark, month, SILVER_RULES):
             blocked[month] = b
     for df in ref:
         df.unpersist()

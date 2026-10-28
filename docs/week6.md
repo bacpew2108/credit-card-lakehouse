@@ -59,7 +59,7 @@ Tháng xử lý do tham số `month` quyết định. Ngoài `month` còn có th
 | `extract_to_bronze` | `extract_jdbc.py transactions --month M`; tháng đã SUCCESS thì bỏ qua | Lỗi trích xuất, R10 lệch khi nạp |
 | `reconcile_src_bronze` | R10.1: đếm lại nguồn và Bronze ngay lúc chạy | Lệch |
 | `silver_transform` | Cách ly R01–R03, MERGE, ghi R01–R03, R10.2, tính lại merchants và I01 | R10.2 lệch |
-| `dq_silver` | R04–R08, R14, R12; xét kết quả mới nhất của mọi rule trong tháng | Có rule BLOCK (không retry) |
+| `dq_silver` | R04–R08, R14, R12; xét kết quả mới nhất của mọi rule từ nguồn đến Silver trong tháng | Có rule BLOCK (không retry) |
 
 - Tháng M lấy từ `data_interval_start`. DAG dùng `CronDataIntervalTimetable`, nên lần chạy của tháng M có khoảng dữ liệu `[đầu M, đầu M+1)`. Tham số `month` ghi đè giá trị này khi trigger thủ công.
 - `catchup=True`, `start_date` 2010-01, `end_date` 2019-10, `max_active_runs=1`. Các tháng chạy lần lượt vì merchants được tính lại trên toàn bảng và R12 cần các tháng trước.

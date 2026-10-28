@@ -120,9 +120,11 @@ MCC không giữ ở đây (456 merchant có 2 MCC) mà giữ ở fact.
 ## 3. Gold – star schema (Hình 4)
 
 Quy ước chung cho mọi dimension:
-- Khóa thay thế (`*_key`) kiểu `int`, sinh theo thứ tự khóa tự nhiên, nên dựng lại thì ra cùng giá trị.
-- Dòng **−1 Unknown** dùng cho khóa không khớp (R04, R06). Dòng **−2 Đã xóa** dùng khi thực hiện quyền xóa dữ liệu. Các cột chuỗi của hai dòng này lần lượt là `'Unknown'` và `'Deleted'`, các cột số là NULL.
-- `dim_customer`, `dim_card` là SCD loại 1: ghi đè khi nguồn thay đổi.
+- Khóa thay thế (`*_key`) kiểu `int`. Khóa tự nhiên (NK) đã có giữ nguyên khóa cũ; NK mới nhận khóa tiếp theo sau khóa lớn nhất, theo thứ tự NK trong lượt nạp đó. Vì vậy thêm dữ liệu không làm đổi khóa của dòng cũ. Khóa phụ thuộc thứ tự nạp: dựng cả khoảng tháng trong một lần thì khóa theo thứ tự NK, còn nạp từng tháng thì NK xuất hiện ở tháng sớm hơn nhận khóa nhỏ hơn. Do đó chỉ dựng lại một dimension từ đầu khi dựng lại cả fact. `dim_date` dùng chính `date_key` (yyyymmdd).
+- Dòng **−1 Unknown** dùng cho khóa không khớp (R04, R06). Dòng **−2 Đã xóa** dùng khi thực hiện quyền xóa dữ liệu. Các cột chuỗi của hai dòng này lần lượt là `'Unknown'` và `'Deleted'`, các cột số và boolean là NULL.
+- `dim_customer`, `dim_card`, `dim_mcc`, `dim_merchant` là SCD loại 1: dim trùng với Silver, ghi đè khi nguồn thay đổi. `dim_location`, `dim_txn_profile` chỉ thêm các vị trí, tổ hợp mới xuất hiện trong các tháng được dựng.
+- Dimension ghi bằng MERGE INTO theo khóa, chỉ các dòng thay đổi (như Silver), nên có thêm `_batch_id` và `_updated_at`. Chạy lại khi Silver không đổi thì không ghi gì.
+- Fact và mart tra dimension bằng join broadcast; mọi dimension đều nhỏ (lớn nhất là dim_merchant, 74.833 dòng).
 
 ### dim_customer (nguồn silver.card.customers)
 customer_key int PK · customer_id int NK · gender string · birth_year smallint · yearly_income decimal(12,2) · income_band string · total_debt decimal(12,2) · debt_to_income decimal(6,3) · credit_score smallint · credit_score_band string · num_credit_cards smallint · latitude double · longitude double
@@ -137,18 +139,25 @@ Không có PAN, CVV, card_bin.
 ### dim_merchant (nguồn silver.card.merchants)
 merchant_key int PK · merchant_id int NK · merchant_city string · merchant_state string · zip string · is_online boolean · is_foreign boolean
 
+`merchant_id` là một chuỗi cửa hàng, không phải một điểm bán: 21,6% merchant có nhiều vị trí, có merchant ở 4.403 vị trí. Các cột vị trí ở đây là **vị trí chính** (xuất hiện nhiều nhất), chỉ để tham khảo. 61% giao dịch không diễn ra ở vị trí chính và 58% khác cả bang, nên vị trí của từng giao dịch nằm ở `dim_location`.
+
+### dim_location (vị trí giao dịch, suy ra từ silver.card.transactions)
+location_key int PK · merchant_city string · merchant_state string · zip string (NK là bộ ba city, state, zip; so khớp null-safe) · is_online boolean (city = `ONLINE`) · is_foreign boolean (state không phải mã bang 2 chữ cái)
+
+25.425 vị trí. Giao dịch online có state, zip NULL; giao dịch nước ngoài có zip NULL.
+
 ### dim_mcc (nguồn silver.card.mcc_codes)
 mcc_key int PK · mcc_code int NK · description string · mcc_group string
 
 ### dim_date (sinh theo lịch, 2010-01-01 → 2019-12-31)
-date_key int PK (yyyymmdd) · full_date date · day_of_week smallint (1 = thứ Hai) · day_name string · week_of_year smallint · month smallint · quarter smallint · year smallint · is_weekend boolean
+date_key int PK (yyyymmdd) · full_date date · day_of_week smallint (1 = thứ Hai) · day_name string (`Thứ Hai` … `Chủ Nhật`) · week_of_year smallint · month smallint · quarter smallint · year smallint · is_weekend boolean
 
 ### dim_txn_profile (junk dimension)
 txn_profile_key int PK · channel string · error_combo string · has_error boolean · is_refund boolean
 
-`error_combo` là các lỗi đã sắp xếp, ghép bằng `', '`, hoặc `'None'` khi không có lỗi. Số dòng tối đa là 3 kênh × 23 tổ hợp (22 tổ hợp + None) × 2 = 138. Thực tế chỉ dựng các tổ hợp có xuất hiện, cộng dòng −1.
+NK là bộ ba (channel, error_combo, is_refund). `error_combo` là các lỗi đã sắp xếp, ghép bằng `', '`, hoặc `'None'` khi không có lỗi. Số dòng tối đa là 3 kênh × 23 tổ hợp (22 tổ hợp + None) × 2 = 138. Thực tế chỉ dựng các tổ hợp có xuất hiện, cộng dòng −1, −2.
 
-### fact_transaction (grain: 1 giao dịch, partition `months(transaction_ts)`)
+### fact_transaction (grain: 1 giao dịch, partition `months(transaction_ts)`, ghi đè partition của tháng M bằng `overwritePartitions`)
 
 | Cột | Kiểu | Ghi chú |
 |---|---|---|
@@ -156,7 +165,8 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 | date_key | int | FK dim_date |
 | customer_key | int | FK dim_customer; −1 nếu client_id không tồn tại |
 | card_key | int | FK dim_card |
-| merchant_key | int | FK dim_merchant |
+| merchant_key | int | FK dim_merchant (chuỗi cửa hàng) |
+| location_key | int | FK dim_location (nơi giao dịch diễn ra) |
 | mcc_key | int | FK dim_mcc; −1 nếu mcc không tồn tại |
 | txn_profile_key | int | FK dim_txn_profile |
 | transaction_ts | timestamp | Phục vụ hidden partitioning và Q3 |
@@ -165,33 +175,39 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 | amount | decimal(12,2) | |
 | batch_id | string | Truy vết batch, phục vụ đối soát R11 |
 
-### Nhóm phân khúc (bản nháp, chốt lại ở tuần 7 theo phân bố thực tế)
+Khóa không khớp nhận −1. Trên dữ liệu thật không có khóa −1 nào (R04, R06 bằng 0). Gold chỉ dựng tháng M khi không có rule nào từ nguồn đến Silver đang BLOCK trong `ops.pipeline.dq_results`.
 
-| Nhóm | Ngưỡng |
-|---|---|
-| age_band | `< 18`, `18–24`, `25–34`, `35–44`, `45–54`, `55–64`, `65+` (đã có profiling) |
-| income_band | `< 30k`, `30–50k`, `50–75k`, `75–100k`, `≥ 100k` (yearly_income, USD) |
-| credit_score_band | `Poor < 580`, `Fair 580–669`, `Good 670–739`, `Very Good 740–799`, `Exceptional ≥ 800` (thang FICO) |
+### Nhóm phân khúc
+
+| Nhóm | Ngưỡng | Phân bố |
+|---|---|---|
+| age_band | `< 18`, `18–24`, `25–34`, `35–44`, `45–54`, `55–64`, `65+` (tuổi tại thời điểm giao dịch) | Có giao dịch ở tuổi 17 (profiling) |
+| income_band | `< 30k`, `30–40k`, `40–50k`, `50–75k`, `≥ 75k` (yearly_income, USD) | 340 / 617 / 448 / 454 / 141 khách; trung vị 40.745 USD |
+| credit_score_band | `Poor (< 580)`, `Fair (580–669)`, `Good (670–739)`, `Very Good (740–799)`, `Exceptional (≥ 800)` (thang FICO) | 81 / 348 / 931 / 474 / 166 khách |
+
+Giá trị thiếu (dòng −1) có nhóm `Unknown`.
 
 ### Mart (tổng hợp sẵn cho dashboard)
 
-`month` là ngày đầu tháng (`date`). Mọi mart được dựng lại theo từng tháng (`overwritePartitions`).
+`month` là ngày đầu tháng (`date`). Mart tổng hợp từ fact join dimension (star join), partition theo `month`. Các tháng được dựng ghi đè bằng điều kiện trên `month`, khớp trọn partition, nên tháng không còn dòng nào của một mart cũng được xóa.
 
 | Mart | Grain | Cột chính | Câu hỏi |
 |---|---|---|---|
 | mart_monthly_kpi | month | txn_count, total_amount, avg_amount, active_customers, active_cards, refund_count, refund_amount, error_txn_count, swipe_count, chip_count, online_count | Q1, Q2 |
 | mart_mcc_monthly | month × mcc_code | mcc_group, description, txn_count, total_amount, refund_count, refund_amount | Q4, Q6 |
-| mart_geo_monthly | month × merchant_state × is_online × is_foreign | txn_count, total_amount | Q5 |
+| mart_geo_monthly | month × merchant_state × is_online × is_foreign, theo **dim_location** | txn_count, total_amount | Q5 |
 | mart_error_monthly | month × error_type × channel | error_count, channel_txn_count (mẫu số để tính tỷ lệ) | Q6 |
 | mart_customer_segment_monthly | month × age_band × income_band × credit_score_band | customer_count, txn_count, total_amount, avg_spend_per_customer | Q7 |
-| mart_card_monthly | month × card_key | card_brand, card_type, txn_count, total_amount, credit_limit, utilization (chỉ thẻ Credit có credit_limit > 0) | Q8, Q9 |
+| mart_card_monthly | month × card_key | card_brand, card_type, credit_limit, txn_count, total_amount, purchase_amount (tổng giao dịch có amount > 0), utilization = purchase_amount / credit_limit (chỉ thẻ Credit có credit_limit > 0, còn lại NULL) | Q8, Q9 |
+
+`active_customers`, `active_cards`, `customer_count` chỉ đếm khóa thật (bỏ −1, −2). R11 đối soát mỗi tháng: số dòng và tổng amount của Silver = fact = `mart_monthly_kpi`.
 
 ## 4. Ops (`ops.pipeline`) – vận hành, chất lượng, danh mục
 
 | Bảng | Cột | Ghi bởi |
 |---|---|---|
 | ops.pipeline.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
-| ops.pipeline.dq_results | run_id, batch_id, rule_id, severity (BLOCK / WARN / INFO), checked_count, failed_count, failed_ratio (double), status (PASS / WARN / BLOCK / INFO), details, created_at | `reconcile.py` (R10), job Silver (R01–R03, I01), `rules.py` (R04–R09, R12, R14), R13. Chỉ ghi thêm: một dòng cho mỗi (lần chạy, batch, rule) |
+| ops.pipeline.dq_results | run_id, batch_id, rule_id, severity (BLOCK / WARN / INFO), checked_count, failed_count, failed_ratio (double), status (PASS / WARN / BLOCK / INFO), details, created_at | `reconcile.py` (R10, R11), job Silver (R01–R03, I01), `rules.py` (R04–R09, R12, R14), R13. Chỉ ghi thêm: một dòng cho mỗi (lần chạy, batch, rule) |
 | ops.pipeline.quarantine_transactions | Các cột của bronze.card.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver |
 | ops.pipeline.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
 
@@ -202,8 +218,9 @@ txn_profile_key int PK · channel string · error_combo string · has_error bool
 - `status` là kết quả của batch:
   - PASS: không có vi phạm.
   - WARN: có vi phạm nhưng batch đi tiếp. Với R01–R03, các bản ghi vi phạm đã nằm trong quarantine.
-  - BLOCK: dừng DAG. Đối soát R10 lệch dù chỉ một dòng; hoặc rule xét từng bản ghi (R01–R09, R14) có `failed_ratio` vượt ngưỡng (mặc định 1%, tham số `--block-ratio` hoặc biến `DQ_BLOCK_RATIO`).
+  - BLOCK: dừng DAG. Đối soát R10, R11 lệch dù chỉ một dòng; hoặc rule xét từng bản ghi (R01–R09, R14) có `failed_ratio` vượt ngưỡng (mặc định 1%, tham số `--block-ratio` hoặc biến `DQ_BLOCK_RATIO`).
   - INFO: chỉ ghi nhận, không chặn.
 - R12 xét theo tháng: `checked_count` = 1, `failed_count` = 1 khi số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng liền trước; chưa đủ 12 tháng thì `checked_count` = 0. R12 chỉ cảnh báo, không nâng thành BLOCK.
-- `details` ghi số vi phạm theo từng điều kiện khi rule có nhiều điều kiện (VD R14: `trước tháng mở thẻ: 1; sau tháng hết hạn: 0`), lý do cách ly với R01–R03, số dòng hai vế với R10, z-score với R12.
-- Kết quả có hiệu lực của một rule trong một batch là dòng mới nhất (`max_by(status, created_at)`). Task `dq_silver` của `dag_monthly` dừng DAG khi kết quả có hiệu lực của bất kỳ rule nào trong tháng là BLOCK.
+- R11 so 4 cặp mỗi tháng (số dòng, tổng amount của Silver với fact; của fact với `mart_monthly_kpi`): `checked_count` = 4, `failed_count` = số cặp lệch.
+- `details` ghi số vi phạm theo từng điều kiện khi rule có nhiều điều kiện (VD R14: `trước tháng mở thẻ: 1; sau tháng hết hạn: 0`), lý do cách ly với R01–R03, số dòng hai vế với R10, số dòng và tổng tiền ba bảng với R11, z-score với R12.
+- Kết quả có hiệu lực của một rule trong một batch là dòng mới nhất (`max_by(status, created_at)`). Task `dq_silver` của `dag_monthly` và job Gold dừng khi kết quả có hiệu lực của một rule từ nguồn đến Silver trong tháng là BLOCK (`SILVER_RULES`: mọi rule trừ R11 và I01). Vì không xét R11, một lần R11 BLOCK cũ không chặn việc chạy lại `dag_monthly` để dựng lại Gold.
