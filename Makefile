@@ -8,6 +8,11 @@ SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
 SPARK := $(COMPOSE) exec -T airflow-scheduler python /opt/airflow/spark
 TRINO := $(COMPOSE) exec -T trino trino --output-format ALIGNED --execute
 BLOCK_RATIO_ARG = $(if $(BLOCK_RATIO),--block-ratio $(BLOCK_RATIO))
+# Docker Desktop Resource Saver: không còn container nào chạy quá 5 phút thì VM ngủ, lệnh đọc được trả
+# từ bộ đệm. Bộ đệm trả 404 cho `image inspect` image tên ngắn (postgres:16-alpine, lakehouse-spark:4.0.4…)
+# dù image có sẵn, compose tưởng thiếu nên pull rồi build lại. `docker system df` không qua bộ đệm,
+# đánh thức VM trước khi compose kiểm tra image.
+WAKE := docker system df >/dev/null
 
 
 .DEFAULT_GOAL := help
@@ -38,10 +43,12 @@ build: ## Build lại image Spark, Airflow, Superset (sau khi sửa Dockerfile h
 	$(COMPOSE) --profile bi build
 
 up: env ## Khởi động toàn bộ dịch vụ (core + bi)
+	@$(WAKE)
 	$(COMPOSE) --profile bi up -d --wait
 	@$(MAKE) --no-print-directory ps
 
 up-core: env ## Khởi động không có Superset (máy ít RAM, khi backfill)
+	@$(WAKE)
 	$(COMPOSE) up -d --wait
 	@$(MAKE) --no-print-directory ps
 

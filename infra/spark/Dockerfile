@@ -1,8 +1,11 @@
 # Image chung cho spark-master, spark-worker và spark-connect (driver), mục 8.
 # PYTHON_VERSION, PYSPARK_VERSION lấy từ x-spark-build-args trong docker-compose.yml (dùng chung với
 # image Airflow): UDF Python được pickle ở client rồi chạy trên executor nên hai bên phải khớp.
+# Ghim digest (bản đa kiến trúc): Docker Hub phát hành lại tag python:3.13-slim-bookworm nhiều lần mỗi
+# tháng, tag trôi thì mất cache build và phải tải lại Java, PySpark (~430 MB). Đổi PYTHON_VERSION thì
+# lấy digest mới: docker buildx imagetools inspect python:<bản>-slim-bookworm
 ARG PYTHON_VERSION
-FROM python:${PYTHON_VERSION}-slim-bookworm
+FROM python:${PYTHON_VERSION}-slim-bookworm@sha256:e32be0e55814a08977501ca863271d9bd02443710db8f2afaf8372e2c4508530
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends default-jre-headless curl procps \
