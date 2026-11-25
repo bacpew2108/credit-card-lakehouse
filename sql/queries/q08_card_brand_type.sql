@@ -1,10 +1,11 @@
--- Q8. Đóng góp của thương hiệu thẻ và loại thẻ vào số giao dịch và giá trị.
+-- Q8. Đóng góp của thương hiệu thẻ và loại thẻ vào số giao dịch và giá trị. Thẻ của khách hàng đã xóa
+-- (khóa −2, make erase) nằm ở nhóm Deleted, vẫn tính vào tổng nhưng không đếm là thẻ có giao dịch.
 -- Nguồn: gold.card.mart_card_monthly. Dashboard D3.
 -- khóa: card_brand, card_type
 SELECT
     card_brand,
     card_type,
-    count(DISTINCT card_key) AS active_cards,
+    count(DISTINCT if(card_key > 0, card_key)) AS active_cards,
     sum(txn_count) AS txn_count,
     sum(total_amount) AS total_amount,
     round(100 * CAST(sum(txn_count) AS double) / sum(sum(txn_count)) OVER (), 2) AS pct_txn,

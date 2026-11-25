@@ -168,8 +168,11 @@ def txn_checks():
     day = F.to_date("transaction_ts")
     city_online = F.coalesce(F.col("merchant_city") == "ONLINE", F.lit(False))
     return {
-        "R04": [("client_id không có trong customers", F.col("_customer").isNull()),
-                ("card_id không có trong cards", F.col("_card").isNull())],
+        # −2: giao dịch của khách hàng đã xóa theo yêu cầu (erase_customer.py), không phải lỗi tham chiếu
+        "R04": [("client_id không có trong customers",
+                 F.col("_customer").isNull() & ~F.col("customer_id").eqNullSafe(F.lit(lh.ERASED_ID))),
+                ("card_id không có trong cards",
+                 F.col("_card").isNull() & ~F.col("card_id").eqNullSafe(F.lit(lh.ERASED_ID)))],
         "R05": [("thẻ thuộc khách hàng khác",
                  F.col("_card").isNotNull() & ~F.col("_card_customer").eqNullSafe(F.col("customer_id")))],
         "R06": [("mcc không có trong mcc_codes", F.col("_mcc").isNull())],

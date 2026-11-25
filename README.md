@@ -75,7 +75,16 @@ Phân tích và dashboard, sau khi Gold có dữ liệu (xem [docs/week9.md](doc
 make queries                 # 17 truy vấn Q1–Q10 (sql/queries) trên Trino bằng vai trò analyst
 make verify-queries          # đối chiếu từng truy vấn với tính toán độc lập bằng DuckDB trên file gốc
 make roles                   # kiểm tra phân quyền 2 vai trò engineer, analyst
-make dashboards              # tạo/cập nhật dashboard D1, D2 trong Superset (đăng nhập admin / SUPERSET_ADMIN_PASSWORD)
+make dashboards              # tạo/cập nhật dashboard D1–D4 trong Superset (đăng nhập admin / SUPERSET_ADMIN_PASSWORD)
+```
+
+Demo tính năng Lakehouse và quyền xóa dữ liệu (xem [docs/week10.md](docs/week10.md)):
+
+```bash
+make demo                    # kịch bản 1–7 của mục 11.1 Design Doc, mỗi kịch bản tự kiểm tra tiêu chí ĐẠT
+make demo S="2 5"            # chỉ chạy một số kịch bản
+make erase CUSTOMER_ID=1510 DRY_RUN=1   # đếm số dòng sẽ bị sửa, không ghi gì
+make demo S=8 CUSTOMER_ID=1510          # kịch bản 8: XÓA THẬT khách hàng (make erase) rồi thử time travel
 ```
 
 Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow và Superset, mất vài phút. Những lần sau `make up` dùng lại image đã build, không build lại, và khởi động trong khoảng 35 giây. Sau khi sửa Dockerfile trong `infra/` hoặc đổi phiên bản trong `x-spark-build-args` thì chạy `make build`.
@@ -90,7 +99,7 @@ Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow v
 | Spark UI (driver `spark-connect`) | http://localhost:4040 |
 | Superset | http://localhost:8088 |
 
-Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ được hiện thực ở tuần 10.
+Gõ `make help` để xem toàn bộ lệnh.
 
 ## Phiên bản công nghệ (chốt tuần 1)
 
@@ -123,15 +132,16 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 │   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv), gold_*.py, marts.py
 │   ├── quality/          # rules.py (rule DQ, dq_results), reconcile.py (R10, R11), pan_scan.py (R13),
 │   │                     # run_report.py (pipeline_runs)
-│   └── maintenance/      # iceberg_maintenance.py, rebuild.py, storage_report.py; erase_customer.py (tuần 10)
+│   ├── maintenance/      # iceberg_maintenance.py, rebuild.py, storage_report.py, erase_customer.py (make erase)
+│   └── demo/             # iceberg_demo.py: phần chạy trên Spark của make demo
 ├── airflow/dags/         # dag_reference, dag_monthly, dag_rebuild, dag_maintenance, dag_smoke_test;
 │                         # pipeline_tasks.py (task dùng chung), alerts.py (on_failure_callback)
 ├── sql/                  # queries/ (Q1–Q10 trên Trino), independent/ (cùng câu hỏi bằng DuckDB trên file gốc),
-│                         # run_queries.py (chạy, đối chiếu, kiểm tra phân quyền); demo Iceberg (tuần 10)
+│                         # run_queries.py (chạy, đối chiếu, kiểm tra phân quyền), run_demo.py (8 kịch bản)
 ├── tests/                # pytest; fixtures/ dữ liệu mẫu có lỗi cố ý cho rule DQ
 └── docs/
     ├── profiling/        # báo cáo profiling tuần 1
-    ├── week2.md … week9.md  # tổng kết từng tuần
+    ├── week2.md … week10.md # tổng kết từng tuần
     ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
     ├── source_to_target_mapping.md
     └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
@@ -150,7 +160,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 7 | Gold | Xong. Xem [docs/week7.md](docs/week7.md) |
 | 8 | Airflow end-to-end | Xong. Xem [docs/week8.md](docs/week8.md) |
 | 9 | SQL phân tích, BI (1) | Xong. Xem [docs/week9.md](docs/week9.md) |
-| 10 | BI (2), tính năng | Tiếp theo |
+| 10 | BI (2), tính năng | Xong. Xem [docs/week10.md](docs/week10.md) |
+| 11 | Hiệu năng, kiểm thử | Tiếp theo |
 
 ## Bảo mật
 
@@ -167,7 +178,7 @@ Mỗi tài khoản MinIO chỉ có quyền trên đúng bucket nó cần (tạo 
 | `pan-scanner` | Đọc `bronze`, `silver`, `gold`, `ops` | Job `pan_scan.py` (R13) trong Airflow |
 
 - **Spark không giữ khóa S3.** Lakekeeper ký từng request S3 của Spark (remote signing) bằng credential của warehouse, nên một bảng thuộc warehouse `silver` chỉ chạm được bucket `silver`.
-- **Trino: 2 vai trò** (file-based access control, [infra/trino/rules.json](infra/trino/rules.json)). User thuộc nhóm theo [infra/trino/groups.txt](infra/trino/groups.txt): nhóm `engineer` (`trino`, user mặc định của `make trino`; `engineer`) đọc mọi catalog, ghi được `ops`; nhóm `analyst` (`superset`, tài khoản Superset; `analyst`) chỉ đọc `gold.card`, `ops.pipeline`. User không thuộc nhóm nào không truy cập được catalog nào. Catalog `bronze`, `silver`, `gold` còn đặt `iceberg.security=read_only` (ba tầng này do Spark ghi), nên kể cả engineer cũng không ghi được qua Trino. `make roles` thử 13 thao tác đọc/ghi và so với phân quyền mong đợi. Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
+- **Trino: 2 vai trò** (file-based access control, [infra/trino/rules.json](infra/trino/rules.json)). User thuộc nhóm theo [infra/trino/groups.txt](infra/trino/groups.txt): nhóm `engineer` (`trino`, user mặc định của `make trino`; `engineer`) đọc mọi catalog, ghi được `ops`; nhóm `analyst` (`superset`, tài khoản Superset; `analyst`) chỉ đọc `gold.card`, `ops.pipeline`. User không thuộc nhóm nào không truy cập được catalog nào. Catalog `bronze`, `silver`, `gold` còn đặt `iceberg.security=read_only` (ba tầng này do Spark ghi), nên kể cả engineer cũng không ghi được qua Trino. `make roles` thử 14 thao tác đọc/ghi và so với phân quyền mong đợi. Danh sách khách hàng đã xóa (`ops.privacy.erasure_log`) chỉ engineer đọc được. Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
 - **Giới hạn:** Lakekeeper và Trino chưa xác thực người dùng (Lakekeeper chạy chế độ allow-all, user Trino do client tự khai, nên ai gọi được cổng 8082 cũng có thể khai là `engineer`; xác thực mật khẩu của Trino bắt buộc HTTPS). Vì vậy mọi job Spark có cùng quyền trên cả bốn warehouse: cô lập giữa các tầng được cưỡng chế ở lưu trữ, nhưng chưa cưỡng chế theo từng job (VD job Silver vẫn có thể ghi vào bảng Bronze qua catalog). Muốn cưỡng chế theo job cần bật xác thực OIDC và phân quyền OpenFGA của Lakekeeper.
 
 ### Quét số thẻ (R13)
@@ -177,6 +188,16 @@ Số thẻ được token hóa trước khi ghi vào Bronze, nên theo thiết k
 ### Dữ liệu cá nhân trong Bronze
 
 Bronze không bật object lock hay versioning của MinIO. Quyền xóa dữ liệu (`erase_customer`) phải xóa được PII của khách hàng (địa chỉ, năm sinh, thu nhập, tọa độ) ở mọi tầng: object lock sẽ chặn việc xóa, còn versioning chỉ thêm delete marker và giữ lại bản cũ, khiến R13 quét bản hiện hành báo sạch trong khi dữ liệu vẫn còn. Số thẻ thì không gặp vấn đề này vì đã được token hóa trước khi ghi vào Bronze. Nếu cần Bronze bất biến cho audit, hướng phù hợp là crypto-shredding: mã hóa PII bằng khóa riêng của từng khách hàng và xóa bằng cách hủy khóa.
+
+### Quyền xóa dữ liệu
+
+`make erase CUSTOMER_ID=…` ([spark/maintenance/erase_customer.py](spark/maintenance/erase_customer.py)) minh họa quyền xóa dữ liệu (Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15). Đây là minh họa kỹ thuật, không phải đánh giá tuân thủ pháp lý. Lệnh làm các việc sau:
+- xóa khách hàng và thẻ ở Bronze, Silver, Gold;
+- giữ giao dịch nhưng chuyển về khóa −2 (Deleted), nên số dòng và tổng tiền không đổi;
+- dựng lại mart;
+- expire mọi snapshot cũ của các bảng đã sửa, nên file cũ bị xóa khỏi MinIO và time travel về trước lúc xóa không còn được.
+
+Khách hàng được ghi vào `ops.privacy.erasure_log`, và `extract_jdbc.py` đọc danh sách này ở mỗi lần trích xuất, nên nạp lại từ nguồn không đưa khách hàng trở lại. Hệ thống nguồn `core_card` không thuộc lakehouse và vẫn giữ khách hàng. Chi tiết ở [docs/week10.md](docs/week10.md).
 
 ### Khóa bí mật
 

@@ -162,11 +162,16 @@ LOOKUPS = {
 }
 
 
+# khóa của fact: cột khóa tự nhiên của giao dịch mang giá trị −2 khi khách hàng đã bị xóa
+ERASED_NK = {"customer_key": "customer_id", "card_key": "card_id"}
+
+
 def fact(txn, dims):
     """Giao dịch Silver (có _batch_id) + dims {tên: DataFrame dimension} → các cột FACT_COLS.
 
     Mỗi khóa được tra bằng join broadcast trên khóa tự nhiên (null-safe, bỏ qua dòng −1, −2);
-    không khớp thì −1 (R04, R06). customer_age_at_txn = năm giao dịch − birth_year.
+    không khớp thì −1 (R04, R06). Giao dịch của khách hàng đã xóa (customer_id, card_id = −2, xem
+    erase_customer.py) nhận khóa −2 Deleted. customer_age_at_txn = năm giao dịch − birth_year.
     """
     df = (txn.withColumn("_date_key", F.date_format("transaction_ts", "yyyyMMdd").cast("int"))
              .withColumn("_error_combo", error_combo(F.col("error_list"))))
@@ -178,7 +183,8 @@ def fact(txn, dims):
         df = df.join(F.broadcast(d), same, "left").drop(*[f"_{name}_{dc}" for _, dc in on])
     return df.select(
         "transaction_id",
-        *[F.coalesce(F.col(k), F.lit(UNKNOWN)).alias(k) for k in KEYS],
+        *[F.coalesce(F.col(k), *([F.when(F.col(ERASED_NK[k]) == DELETED, DELETED)] if k in ERASED_NK else []),
+                     F.lit(UNKNOWN)).alias(k) for k in KEYS],
         "transaction_ts",
         F.hour("transaction_ts").alias("txn_hour"),
         (F.year("transaction_ts") - F.col("_birth_year")).alias("customer_age_at_txn"),

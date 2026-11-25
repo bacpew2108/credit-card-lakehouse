@@ -109,6 +109,23 @@ def test_fact_unknown_keys_only_for_r04_r06(gold):
     assert (r[100].date_key, r[100].txn_hour, r[100].customer_age_at_txn) == (20190301, 0, 2019 - 1979)
 
 
+def test_fact_erased_customer_gets_deleted_key(gold):
+    """Giao dịch của khách hàng đã xóa (customer_id, card_id = −2): khóa −2 Deleted, không phải −1; mart
+    gộp vào nhóm Deleted, tổng không đổi."""
+    erased = gold.silver
+    for c in ("customer_id", "card_id"):
+        erased = erased.withColumn(c, F.when(F.col("transaction_id") == 100, -2).otherwise(F.col(c)))
+    f = gt.fact(erased, gold.dims)
+    r = {x.transaction_id: x for x in f.collect()}
+    assert (r[100].customer_key, r[100].card_key, r[100].customer_age_at_txn) == (-2, -2, None)
+    assert all(getattr(r[t], k) == getattr(gold.rows[t], k) for t in r if t != 100 for k in gt.KEYS)
+    deleted = [x for x in gt.mart_card_monthly(f, gold.dims).collect() if x.card_key == -2]
+    assert [(x.card_brand, x.card_type, x.txn_count, x.utilization) for x in deleted] == \
+        [("Deleted", "Deleted", 1, None)]
+    agg = [F.count(F.lit(1)), F.sum("amount")]
+    assert tuple(f.agg(*agg).first()) == tuple(gold.fact.agg(*agg).first())
+
+
 def test_fact_matches_silver(gold):
     agg = [F.count(F.lit(1)), F.sum("amount")]
     assert tuple(gold.fact.agg(*agg).first()) == tuple(gold.silver.agg(*agg).first()) == (14, Decimal("160.49"))

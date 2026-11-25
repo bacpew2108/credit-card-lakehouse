@@ -63,11 +63,29 @@ def run_trino(conn, sql_text):
 
 # ---------------------------------------------------------------- DuckDB trên CSV gốc
 
-def duck_conn(data_dir):
-    """DuckDB in-memory với các bảng tx, customers, cards, mcc, dq_month dựng từ file gốc (_base.sql)."""
+def erased_customers(args):
+    """customer_id trong danh sách xóa ops.privacy.erasure_log (make erase). Chỉ vai trò engineer đọc
+    được bảng này; bảng chưa có (chưa xóa ai) thì rỗng."""
+    import trino
+    conn = trino.dbapi.connect(host=args.host, port=args.port, user="engineer", http_scheme="http")
+    try:
+        _, rows, _ = run_trino(conn, "SELECT DISTINCT customer_id FROM ops.privacy.erasure_log")
+    except trino.exceptions.TrinoUserError as e:
+        if e.error_name in ("TABLE_NOT_FOUND", "SCHEMA_NOT_FOUND"):
+            return []
+        raise
+    return sorted(r[0] for r in rows)
+
+
+def duck_conn(data_dir, erased=()):
+    """DuckDB in-memory với các bảng tx, customers, cards, mcc, dq_month dựng từ file gốc (_base.sql).
+    erased: khách hàng đã xóa theo yêu cầu, _base.sql ẩn danh giao dịch của họ như erase_customer.py."""
     import duckdb
     data_dir = Path(data_dir).resolve()
     con = duckdb.connect()
+    con.execute("CREATE TABLE erased (customer_id INTEGER)")
+    if erased:
+        con.executemany("INSERT INTO erased VALUES (?)", [(int(c),) for c in erased])
     con.execute("CREATE TABLE mcc (mcc_code INTEGER, description VARCHAR)")
     codes = json.loads((data_dir / "mcc_codes.json").read_text())
     con.executemany("INSERT INTO mcc VALUES (?, ?)", [(int(k), v) for k, v in codes.items()])
@@ -75,7 +93,8 @@ def duck_conn(data_dir):
     t0 = time.time()
     con.execute(base.replace("{data_dir}", str(data_dir)).replace("{mcc_groups}", str(MCC_GROUPS)))
     n = con.execute("SELECT count(*) FROM tx").fetchone()[0]
-    print(f"[duckdb] đọc {n:,} giao dịch từ {data_dir}, {time.time() - t0:.0f}s")
+    print(f"[duckdb] đọc {n:,} giao dịch từ {data_dir}, {time.time() - t0:.0f}s"
+          + (f"; ẩn danh giao dịch của {len(erased)} khách hàng đã xóa {list(erased)}" if erased else ""))
     return con
 
 
@@ -173,6 +192,7 @@ ROLE_CHECKS = [
     ("analyst", "đọc ops", "SELECT count(*) FROM ops.pipeline.dq_results", True),
     ("analyst", "đọc silver", "SELECT count(*) FROM silver.card.customers", False),
     ("analyst", "đọc bronze", "SELECT count(*) FROM bronze.card.cards_raw", False),
+    ("analyst", "đọc danh sách xóa", "SELECT count(*) FROM ops.privacy.erasure_log", False),
     ("analyst", "tạo bảng trong ops", "CREATE TABLE ops.pipeline.role_check AS SELECT 1 AS x", False),
     ("analyst", "ghi vào ops", "DELETE FROM ops.pipeline.smoke_test WHERE id = -100", False),
     ("guest", "đọc gold", "SELECT count(*) FROM gold.card.dim_mcc", False),
@@ -215,7 +235,7 @@ def cmd_run(args):
 
 def cmd_verify(args):
     conn = trino_conn(args)
-    duck = duck_conn(args.data_dir)
+    duck = duck_conn(args.data_dir, erased_customers(args))
     failed, skipped = [], []
     for f in query_files(args.queries):
         ind = INDEPENDENT / f.name

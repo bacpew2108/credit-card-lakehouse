@@ -254,15 +254,16 @@ verify-queries: ## Đối chiếu Q1–Q10 với tính toán độc lập bằng
 roles: ## Kiểm tra phân quyền Trino 2 vai trò (engineer, analyst) bằng các lệnh đọc/ghi thử
 	$(PY) sql/run_queries.py roles
 
-dashboards: ## Tạo/cập nhật dataset, chart, dashboard D1, D2 trong Superset rồi chạy thử truy vấn mọi chart
+dashboards: ## Tạo/cập nhật dataset, chart, dashboard D1–D4 trong Superset rồi chạy thử truy vấn mọi chart
 	set -o pipefail; $(COMPOSE) exec -T superset python /app/lakehouse/dashboards.py 2>&1 | grep -E '^\[superset\]|Error|error'
 	set -o pipefail; $(COMPOSE) exec -T superset python /app/lakehouse/dashboards.py check 2>&1 | grep -E '^\[check\]|Error|error'
 
-demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
-	@echo "Chưa hiện thực (tuần 10)"; exit 1
+demo: ## 8 kịch bản tính năng mục 11.1: make demo [S="2 5"] (mặc định 1–7); kịch bản 8 xóa thật: S=8 CUSTOMER_ID=…
+	$(PY) sql/run_demo.py $(S) $(if $(CUSTOMER_ID),--customer-id $(CUSTOMER_ID))
 
-erase: ## (Tuần 10) Quyền xóa dữ liệu: make erase CUSTOMER_ID=…
-	@echo "Chưa hiện thực (tuần 10)"; exit 1
+erase: ## Quyền xóa dữ liệu: xóa một khách hàng khỏi Bronze/Silver/Gold, expire snapshot: make erase CUSTOMER_ID=1510 [DRY_RUN=1]
+	@test -n "$(CUSTOMER_ID)" || (echo "Thiếu CUSTOMER_ID, VD: make erase CUSTOMER_ID=1510 (DRY_RUN=1 để chỉ đếm)"; exit 1)
+	$(SPARK)/maintenance/erase_customer.py --customer-id $(CUSTOMER_ID) $(if $(DRY_RUN),--dry-run)
 
 test: ## Chạy pytest (có Spark local cho hàm biến đổi Silver; cần Java 17)
 	$(UV) --with pyspark==4.0.4 python -m pytest -q
