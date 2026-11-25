@@ -69,6 +69,15 @@ make runs-status                                      # kết quả từng lần
 
 Task thất bại thì `on_failure_callback` ghi `ops.pipeline.pipeline_runs`, ghi dòng `[ALERT]` vào log và gửi Telegram nếu `.env` có `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
+Phân tích và dashboard, sau khi Gold có dữ liệu (xem [docs/week9.md](docs/week9.md)):
+
+```bash
+make queries                 # 17 truy vấn Q1–Q10 (sql/queries) trên Trino bằng vai trò analyst
+make verify-queries          # đối chiếu từng truy vấn với tính toán độc lập bằng DuckDB trên file gốc
+make roles                   # kiểm tra phân quyền 2 vai trò engineer, analyst
+make dashboards              # tạo/cập nhật dashboard D1, D2 trong Superset (đăng nhập admin / SUPERSET_ADMIN_PASSWORD)
+```
+
 Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow và Superset, mất vài phút. Những lần sau `make up` dùng lại image đã build, không build lại, và khởi động trong khoảng 35 giây. Sau khi sửa Dockerfile trong `infra/` hoặc đổi phiên bản trong `x-spark-build-args` thì chạy `make build`.
 
 | Dịch vụ | URL |
@@ -96,7 +105,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | Cụm Spark | `spark-master`, `spark-worker` (4 nhân, 2 GB), `spark-connect` (driver thường trực, cổng 15002); image `lakehouse-spark` = Python 3.13 + Java 17 + PySpark và các jar ở trên | Đang dùng |
 | Apache Superset | 6.0.0 + `trino` 0.340.0 + `psycopg2-binary` 2.9.13 | Đang dùng |
 | PostgreSQL | 16 (`postgres-meta`: 3 database; `postgres-source`: core_card) | Đang dùng |
-| Python host | 3.13, DuckDB 1.5.6, psycopg 3.3.5, minio 7.2.20 | Profiling, seed nguồn, test |
+| Python host | 3.13, DuckDB 1.5.6, psycopg 3.3.5, minio 7.2.20, trino 0.340.0 | Profiling, seed nguồn, đối chiếu truy vấn, test |
 
 ## Cấu trúc thư mục
 
@@ -105,6 +114,7 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 ├── Makefile
 ├── .env.example          # mẫu biến môi trường (khóa HMAC, mật khẩu)
 ├── infra/                # airflow, spark, trino, lakekeeper, minio, postgres-meta, postgres-source, superset
+│                         # (superset/dashboards.py: dataset, chart, dashboard dựng từ code)
 ├── data/raw/             # bộ dữ liệu Kaggle (không commit)
 ├── generators/           # seed_source.py – nạp dữ liệu nguồn vào core_card
 ├── spark/
@@ -116,11 +126,12 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 │   └── maintenance/      # iceberg_maintenance.py, rebuild.py, storage_report.py; erase_customer.py (tuần 10)
 ├── airflow/dags/         # dag_reference, dag_monthly, dag_rebuild, dag_maintenance, dag_smoke_test;
 │                         # pipeline_tasks.py (task dùng chung), alerts.py (on_failure_callback)
-├── sql/                  # truy vấn Q1–Q10, demo Iceberg (tuần 11)
+├── sql/                  # queries/ (Q1–Q10 trên Trino), independent/ (cùng câu hỏi bằng DuckDB trên file gốc),
+│                         # run_queries.py (chạy, đối chiếu, kiểm tra phân quyền); demo Iceberg (tuần 10)
 ├── tests/                # pytest; fixtures/ dữ liệu mẫu có lỗi cố ý cho rule DQ
 └── docs/
     ├── profiling/        # báo cáo profiling tuần 1
-    ├── week2.md … week8.md  # tổng kết từng tuần
+    ├── week2.md … week9.md  # tổng kết từng tuần
     ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
     ├── source_to_target_mapping.md
     └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
@@ -138,7 +149,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 6 | Data quality, Airflow (1) | Xong. Xem [docs/week6.md](docs/week6.md) |
 | 7 | Gold | Xong. Xem [docs/week7.md](docs/week7.md) |
 | 8 | Airflow end-to-end | Xong. Xem [docs/week8.md](docs/week8.md) |
-| 9 | SQL phân tích, BI (1) | Tiếp theo |
+| 9 | SQL phân tích, BI (1) | Xong. Xem [docs/week9.md](docs/week9.md) |
+| 10 | BI (2), tính năng | Tiếp theo |
 
 ## Bảo mật
 
@@ -155,8 +167,8 @@ Mỗi tài khoản MinIO chỉ có quyền trên đúng bucket nó cần (tạo 
 | `pan-scanner` | Đọc `bronze`, `silver`, `gold`, `ops` | Job `pan_scan.py` (R13) trong Airflow |
 
 - **Spark không giữ khóa S3.** Lakekeeper ký từng request S3 của Spark (remote signing) bằng credential của warehouse, nên một bảng thuộc warehouse `silver` chỉ chạm được bucket `silver`.
-- **Trino:** catalog `bronze`, `silver`, `gold` đặt `iceberg.security=read_only` (ba tầng này do Spark ghi). User `superset` chỉ đọc được catalog `gold` và `ops` ([infra/trino/rules.json](infra/trino/rules.json)); Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
-- **Giới hạn:** Lakekeeper và Trino chưa xác thực người dùng (Lakekeeper chạy chế độ allow-all, user Trino do client tự khai). Vì vậy mọi job Spark có cùng quyền trên cả bốn warehouse: cô lập giữa các tầng được cưỡng chế ở lưu trữ, nhưng chưa cưỡng chế theo từng job (VD job Silver vẫn có thể ghi vào bảng Bronze qua catalog). Muốn cưỡng chế theo job cần bật xác thực OIDC và phân quyền OpenFGA của Lakekeeper.
+- **Trino: 2 vai trò** (file-based access control, [infra/trino/rules.json](infra/trino/rules.json)). User thuộc nhóm theo [infra/trino/groups.txt](infra/trino/groups.txt): nhóm `engineer` (`trino`, user mặc định của `make trino`; `engineer`) đọc mọi catalog, ghi được `ops`; nhóm `analyst` (`superset`, tài khoản Superset; `analyst`) chỉ đọc `gold.card`, `ops.pipeline`. User không thuộc nhóm nào không truy cập được catalog nào. Catalog `bronze`, `silver`, `gold` còn đặt `iceberg.security=read_only` (ba tầng này do Spark ghi), nên kể cả engineer cũng không ghi được qua Trino. `make roles` thử 13 thao tác đọc/ghi và so với phân quyền mong đợi. Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
+- **Giới hạn:** Lakekeeper và Trino chưa xác thực người dùng (Lakekeeper chạy chế độ allow-all, user Trino do client tự khai, nên ai gọi được cổng 8082 cũng có thể khai là `engineer`; xác thực mật khẩu của Trino bắt buộc HTTPS). Vì vậy mọi job Spark có cùng quyền trên cả bốn warehouse: cô lập giữa các tầng được cưỡng chế ở lưu trữ, nhưng chưa cưỡng chế theo từng job (VD job Silver vẫn có thể ghi vào bảng Bronze qua catalog). Muốn cưỡng chế theo job cần bật xác thực OIDC và phân quyền OpenFGA của Lakekeeper.
 
 ### Quét số thẻ (R13)
 

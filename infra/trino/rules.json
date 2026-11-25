@@ -1,8 +1,18 @@
 {
   "catalogs": [
-    {"user": "superset", "catalog": "(gold|ops)", "allow": "read-only"},
-    {"user": "superset", "catalog": "system", "allow": "read-only"},
-    {"user": "superset", "catalog": ".*", "allow": "none"},
-    {"catalog": ".*", "allow": "all"}
+    {"group": "engineer", "catalog": ".*", "allow": "all"},
+    {"group": "analyst", "catalog": "(gold|ops|system)", "allow": "read-only"},
+    {"catalog": ".*", "allow": "none"}
+  ],
+  "schemas": [
+    {"group": "engineer", "owner": true},
+    {"group": "analyst", "owner": false}
+  ],
+  "tables": [
+    {"group": "engineer", "privileges": ["SELECT", "INSERT", "DELETE", "UPDATE", "OWNERSHIP", "GRANT_SELECT"]},
+    {"group": "analyst", "catalog": "gold", "schema": "card", "privileges": ["SELECT"]},
+    {"group": "analyst", "catalog": "ops", "schema": "pipeline", "privileges": ["SELECT"]},
+    {"group": "analyst", "catalog": "system", "privileges": ["SELECT"]},
+    {"privileges": []}
   ]
 }

@@ -244,6 +244,8 @@ services:
       - ./infra/trino/catalog:/etc/trino/catalog:ro
       - ./infra/trino/access-control.properties:/etc/trino/access-control.properties:ro
       - ./infra/trino/rules.json:/etc/trino/rules.json:ro
+      - ./infra/trino/group-provider.properties:/etc/trino/group-provider.properties:ro
+      - ./infra/trino/groups.txt:/etc/trino/groups.txt:ro
     healthcheck:
       test: ["CMD", "/usr/lib/trino/bin/health-check"]
       interval: 10s
@@ -412,8 +414,14 @@ services:
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
       SUPERSET_DATABASE_URI: postgresql+psycopg2://${SUPERSET_DB_USER}:${SUPERSET_DB_PASSWORD}@postgres-meta:5432/${SUPERSET_DB_NAME}
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      TRINO_USER: ${TRINO_USER:-superset}
+      LAKEHOUSE_QUERIES: /app/queries
     volumes: &superset-volumes
       - ./infra/superset/superset_config.py:/app/superset_config.py:ro
+      # make dashboards: script tạo dashboard (dashboards.py) và các truy vấn Q1–Q10 làm dataset.
+      # Mount thư mục, không mount từng file: sửa file trên host thì container thấy ngay
+      - ./infra/superset:/app/lakehouse:ro
+      - ./sql/queries:/app/queries:ro
     command: >
       /bin/sh -c "
       superset db upgrade &&
