@@ -62,7 +62,7 @@ Tháng xử lý do tham số `month` quyết định. Ngoài `month` còn có th
 | `dq_silver` | R04–R08, R14, R12; xét kết quả mới nhất của mọi rule từ nguồn đến Silver trong tháng | Có rule BLOCK (không retry) |
 
 - Tháng M lấy từ `data_interval_start`. DAG dùng `CronDataIntervalTimetable`, nên lần chạy của tháng M có khoảng dữ liệu `[đầu M, đầu M+1)`. Tham số `month` ghi đè giá trị này khi trigger thủ công.
-- `catchup=True`, `start_date` 2010-01, `end_date` 2019-10, `max_active_runs=1`. Các tháng chạy lần lượt vì merchants được tính lại trên toàn bảng và R12 cần các tháng trước.
+- `catchup=True`, `start_date` 2010-01 (tuần 8 đổi thành 2019-01, xem [week8.md](week8.md)), `end_date` 2019-10, `max_active_runs=1`. Các tháng chạy lần lượt vì merchants được tính lại trên toàn bảng và R12 cần các tháng trước.
 - Mọi task Spark dùng pool `spark` (1 slot), nên các job của `dag_monthly` và `dag_reference` không chạy chồng lên nhau trên cụm Spark. Sensor dùng `default_pool`.
 - `retries = 2` cho mọi task, trừ task DQ: BLOCK là kết quả của dữ liệu, chạy lại cũng không đổi.
 
@@ -104,4 +104,4 @@ Tháng xử lý do tham số `month` quyết định. Ngoài `month` còn có th
 ## Lưu ý
 
 - Chưa có R11 (Silver = fact, tuần 7) và R13 (quét số thẻ, `dag_maintenance` tuần 8). Các task `gold_build`, `refresh_marts`, `reconcile_silver_gold` thuộc tuần 7; `publish_run_report`, `on_failure_callback` thuộc tuần 8.
-- **Scheduler chỉ chạy task của DAG đã bật (unpause), kể cả lần chạy do `airflow backfill create` hay `airflow dags trigger` tạo ra.** Với `catchup=True`, bật `dag_monthly` lên là scheduler tạo đủ 118 lần chạy từ 2010-01, mỗi lần khoảng một phút (Bronze bỏ qua tháng đã nạp, MERGE không ghi gì). Vì vậy ở tuần này `dag_monthly` vẫn tạm dừng và chỉ được chạy thử bằng `airflow dags test`. Cách nạp lịch sử (catchup đủ 118 tháng, hay backfill bằng `*-range` rồi chỉ chạy DAG cho các tháng 2019) sẽ chốt ở tuần 8.
+- **Scheduler chỉ chạy task của DAG đã bật (unpause), kể cả lần chạy do `airflow backfill create` hay `airflow dags trigger` tạo ra.** Với `catchup=True`, bật `dag_monthly` lên là scheduler tạo đủ 118 lần chạy từ 2010-01, mỗi lần khoảng một phút (Bronze bỏ qua tháng đã nạp, MERGE không ghi gì). Vì vậy ở tuần này `dag_monthly` vẫn tạm dừng và chỉ được chạy thử bằng `airflow dags test`. Cách nạp lịch sử (catchup đủ 118 tháng, hay backfill bằng `*-range` rồi chỉ chạy DAG cho các tháng 2019) sẽ chốt ở tuần 8. Tuần 8 đã chốt: lịch sử nạp bằng `dag_rebuild`, `dag_monthly` catchup từ 2019-01 ([week8.md](week8.md), quyết định 1).

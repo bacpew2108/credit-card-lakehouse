@@ -5,12 +5,13 @@ dim_mcc, dim_date của Gold. Batch là ref_YYYYMMDD theo ngày chạy; batch đ
 qua, trừ khi bật force. dq_reference thất bại khi có rule BLOCK, nên dimension không được cập nhật.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG, Param
 
-JOB = "python /opt/airflow/spark"
+from pipeline_tasks import DEFAULT_ARGS, JOB, block_ratio_param
+
 FORCE = "{{ '--force' if params.force else '' }}"
 
 with DAG(
@@ -19,11 +20,10 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
-    default_args={"retries": 2, "retry_delay": timedelta(minutes=2), "pool": "spark"},
+    default_args=DEFAULT_ARGS,
     params={
         "force": Param(False, type="boolean", description="nạp lại Bronze dù batch hôm nay đã nạp"),
-        "block_ratio": Param(0.01, type="number", minimum=0, maximum=1,
-                             description="tỷ lệ vi phạm mà vượt quá thì BLOCK"),
+        "block_ratio": block_ratio_param(),
     },
     tags=["pipeline"],
 ) as dag:

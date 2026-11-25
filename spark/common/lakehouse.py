@@ -24,6 +24,28 @@ DQ_COLS = """
     run_id STRING, batch_id STRING, rule_id STRING, severity STRING,
     checked_count BIGINT, failed_count BIGINT, failed_ratio DOUBLE, status STRING,
     details STRING, created_at TIMESTAMP"""
+# Một dòng cho mỗi lần chạy DAG: publish_run_report ghi khi thành công, on_failure_callback ghi khi
+# một task thất bại (spark/quality/run_report.py)
+RUNS_TABLE = "ops.pipeline.pipeline_runs"
+RUNS_COLS = """
+    run_id STRING, dag_id STRING, batch_id STRING, month_count INT, status STRING,
+    failed_task STRING, message STRING,
+    source_rows BIGINT, bronze_rows BIGINT, silver_rows BIGINT, quarantine_rows BIGINT, fact_rows BIGINT,
+    dq_pass INT, dq_warn INT, dq_block INT, dq_issues STRING,
+    started_at TIMESTAMP, finished_at TIMESTAMP, duration_seconds DOUBLE"""
+# Kích thước từng bảng sau mỗi lần bảo trì (spark/maintenance/storage_report.py --record)
+STATS_TABLE = "ops.pipeline.table_stats"
+STATS_COLS = """
+    run_id STRING, measured_at TIMESTAMP, table_name STRING, row_count BIGINT, data_bytes BIGINT,
+    data_files INT, snapshots INT"""
+
+
+def ensure_ops_table(spark, table, cols):
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {table} ({cols}
+        ) USING iceberg
+        TBLPROPERTIES ('format-version' = '2')
+    """)
 
 
 def get_spark(app):
@@ -31,12 +53,13 @@ def get_spark(app):
     for ns in NAMESPACES:
         spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {ns}")
     for table, cols in ((LOG_TABLE, LOG_COLS), (DQ_TABLE, DQ_COLS)):
-        spark.sql(f"""
-            CREATE TABLE IF NOT EXISTS {table} ({cols}
-            ) USING iceberg
-            TBLPROPERTIES ('format-version' = '2')
-        """)
+        ensure_ops_table(spark, table, cols)
     return spark
+
+
+def all_tables(spark):
+    """Tên đầy đủ của mọi bảng Iceberg trong bốn tầng, theo thứ tự tầng."""
+    return [f"{ns}.{r.tableName}" for ns in NAMESPACES for r in spark.sql(f"SHOW TABLES IN {ns}").collect()]
 
 
 def ensure_bronze_table(spark, table, cols, partition=None, extra_ddl=None):

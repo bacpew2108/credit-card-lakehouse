@@ -4,7 +4,8 @@
     python gold_fact.py --from 2010-01 --to 2019-10
 
 1. Dừng nếu có tháng mà một rule từ nguồn đến Silver đang BLOCK trong ops.pipeline.dq_results
-   (mục 4.1: chỉ dựng Gold khi không có rule BLOCK), hoặc dimension tham chiếu chưa được dựng.
+   (mục 4.1: chỉ dựng Gold khi không có rule BLOCK), nếu lần quét số thẻ R13 gần nhất là BLOCK
+   (mục 6: chặn công bố), hoặc dimension tham chiếu chưa được dựng.
 2. Cập nhật dim_merchant, dim_location, dim_txn_profile theo giao dịch của các tháng, trong cùng
    session (gold_dimensions.run_transactions).
 3. Mỗi tháng M: tra khóa mọi dimension cho giao dịch Silver của M rồi ghi đè partition của M
@@ -43,6 +44,9 @@ def check_ready(spark, months):
     if blocked:
         raise RuntimeError("rule BLOCK, không dựng Gold: "
                            + "; ".join(f"{m}: {', '.join(r)}" for m, r in blocked.items()))
+    r13 = dq.latest_result(spark, "R13")
+    if r13 is not None and r13.status == "BLOCK":
+        raise RuntimeError(f"R13 BLOCK ({r13.batch_id}), không dựng Gold cho tới khi quét lại PASS: {r13.details}")
     for name in gold_dimensions.REFERENCE_DIMS:
         key = gold_dimensions.DIMS[name][0]
         if not spark.catalog.tableExists(h.GOLD_DIMS[name]) or \

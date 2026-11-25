@@ -96,6 +96,14 @@ def iter_months(first, last):
     return out
 
 
+def batch_label(months):
+    """Nhãn batch của một lần chạy: ['2019-03'] → '2019-03'; nhiều tháng → '2010-01..2018-12';
+    không có tháng → None."""
+    if not months:
+        return None
+    return months[0] if len(months) == 1 else f"{months[0]}..{months[-1]}"
+
+
 def add_month_args(ap):
     """Thêm --month, --from, --to vào argparse; đọc lại bằng resolve_months(args)."""
     ap.add_argument("--month")

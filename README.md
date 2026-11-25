@@ -49,7 +49,25 @@ make gold-range FROM=2010-01 TO=2019-10       # dim từ giao dịch, fact, 6 ma
 make gold-status
 ```
 
-Các bước trên cũng chạy được bằng Airflow: `dag_reference` (thủ công, đến dimension tham chiếu của Gold) và `dag_monthly` (mỗi lần chạy một tháng, từ nguồn đến fact, mart và R11). Xem [docs/week6.md](docs/week6.md), [docs/week7.md](docs/week7.md).
+Các lệnh trên chạy từng job bằng tay. Để Airflow tự chạy toàn bộ (xem [docs/week8.md](docs/week8.md)):
+
+```bash
+make dag-trigger DAG=dag_reference                    # dữ liệu tham chiếu: nguồn → Bronze → Silver → dimension
+make dag-runs DAG=dag_reference                       # chờ lần chạy này thành công rồi mới nạp giao dịch
+make rebuild FROM=2010-01 TO=2018-12 EXTRACT=1        # dag_rebuild nạp lịch sử 108 tháng trong một lần chạy
+make dag-on DAG=dag_monthly                           # catchup 2019-01 → 2019-10, mỗi tháng một lần chạy
+make dag-on DAG=dag_maintenance                       # bảo trì Iceberg và quét số thẻ R13 hằng tuần
+make runs-status                                      # kết quả từng lần chạy (ops.pipeline.pipeline_runs)
+```
+
+| DAG | Lịch | Việc |
+|---|---|---|
+| `dag_reference` | Thủ công | customers, cards, mcc_codes: nguồn → Bronze → Silver → R09 → dimension tham chiếu |
+| `dag_monthly` | Hằng tháng, catchup từ 2019-01 | Một tháng giao dịch từ nguồn đến fact, mart, R11 và báo cáo lần chạy |
+| `dag_rebuild` | Thủ công, `start_month`, `end_month` | Dựng lại Silver và Gold từ Bronze cho một khoảng tháng, kiểm chứng kết quả trùng khớp; cũng dùng để nạp lịch sử |
+| `dag_maintenance` | Hằng tuần | Gộp file, gộp manifest, xóa snapshot cũ, xóa file mồ côi, quét số thẻ (R13), thống kê kích thước bảng |
+
+Task thất bại thì `on_failure_callback` ghi `ops.pipeline.pipeline_runs`, ghi dòng `[ALERT]` vào log và gửi Telegram nếu `.env` có `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
 Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow và Superset, mất vài phút. Những lần sau `make up` dùng lại image đã build, không build lại, và khởi động trong khoảng 35 giây. Sau khi sửa Dockerfile trong `infra/` hoặc đổi phiên bản trong `x-spark-build-args` thì chạy `make build`.
 
@@ -63,7 +81,7 @@ Lần đầu `make up` tự build image Spark (tải PySpark ~430 MB), Airflow v
 | Spark UI (driver `spark-connect`) | http://localhost:4040 |
 | Superset | http://localhost:8088 |
 
-Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ được hiện thực dần theo kế hoạch.
+Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ được hiện thực ở tuần 10.
 
 ## Phiên bản công nghệ (chốt tuần 1)
 
@@ -93,14 +111,16 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 │   ├── common/           # helpers.py (hàm thuần), lakehouse.py (session, bảng ops, MERGE)
 │   ├── extract/          # extract_jdbc.py, load_files.py
 │   ├── transform/        # silver_*.py (+ ref/mcc_groups.csv), gold_*.py, marts.py
-│   ├── quality/          # rules.py (rule DQ, dq_results), reconcile.py (R10, R11); pan_scan.py (tuần 8)
-│   └── maintenance/      # storage_report.py; iceberg_maintenance.py, erase_customer.py (tuần 8–10)
-├── airflow/dags/         # dag_smoke_test, dag_reference, dag_monthly; dag_rebuild, dag_maintenance (tuần 8)
+│   ├── quality/          # rules.py (rule DQ, dq_results), reconcile.py (R10, R11), pan_scan.py (R13),
+│   │                     # run_report.py (pipeline_runs)
+│   └── maintenance/      # iceberg_maintenance.py, rebuild.py, storage_report.py; erase_customer.py (tuần 10)
+├── airflow/dags/         # dag_reference, dag_monthly, dag_rebuild, dag_maintenance, dag_smoke_test;
+│                         # pipeline_tasks.py (task dùng chung), alerts.py (on_failure_callback)
 ├── sql/                  # truy vấn Q1–Q10, demo Iceberg (tuần 11)
 ├── tests/                # pytest; fixtures/ dữ liệu mẫu có lỗi cố ý cho rule DQ
 └── docs/
     ├── profiling/        # báo cáo profiling tuần 1
-    ├── week2.md … week7.md  # tổng kết từng tuần
+    ├── week2.md … week8.md  # tổng kết từng tuần
     ├── data_model.md     # đặc tả Bronze/Silver/Gold/ops
     ├── source_to_target_mapping.md
     └── data_catalog.csv  # danh mục dữ liệu cá nhân (bản nháp)
@@ -117,7 +137,8 @@ Gõ `make help` để xem toàn bộ lệnh. Các lệnh `demo`, `erase` sẽ đ
 | 5 | Silver | Xong. Xem [docs/week5.md](docs/week5.md) |
 | 6 | Data quality, Airflow (1) | Xong. Xem [docs/week6.md](docs/week6.md) |
 | 7 | Gold | Xong. Xem [docs/week7.md](docs/week7.md) |
-| 8 | Airflow end-to-end | Tiếp theo |
+| 8 | Airflow end-to-end | Xong. Xem [docs/week8.md](docs/week8.md) |
+| 9 | SQL phân tích, BI (1) | Tiếp theo |
 
 ## Bảo mật
 
@@ -131,10 +152,15 @@ Mỗi tài khoản MinIO chỉ có quyền trên đúng bucket nó cần (tạo 
 | `trino` | Đọc `bronze`, `silver`, `gold`; đọc/ghi `ops` | Trino |
 | `landing-writer` | Đọc/ghi `landing` | `seed_source.py` |
 | `landing-reader` | Đọc `landing` | Job `load_files.py` (boto3) trong Airflow |
+| `pan-scanner` | Đọc `bronze`, `silver`, `gold`, `ops` | Job `pan_scan.py` (R13) trong Airflow |
 
 - **Spark không giữ khóa S3.** Lakekeeper ký từng request S3 của Spark (remote signing) bằng credential của warehouse, nên một bảng thuộc warehouse `silver` chỉ chạm được bucket `silver`.
 - **Trino:** catalog `bronze`, `silver`, `gold` đặt `iceberg.security=read_only` (ba tầng này do Spark ghi). User `superset` chỉ đọc được catalog `gold` và `ops` ([infra/trino/rules.json](infra/trino/rules.json)); Superset không có khóa S3 nên chỉ truy cập dữ liệu qua Trino.
 - **Giới hạn:** Lakekeeper và Trino chưa xác thực người dùng (Lakekeeper chạy chế độ allow-all, user Trino do client tự khai). Vì vậy mọi job Spark có cùng quyền trên cả bốn warehouse: cô lập giữa các tầng được cưỡng chế ở lưu trữ, nhưng chưa cưỡng chế theo từng job (VD job Silver vẫn có thể ghi vào bảng Bronze qua catalog). Muốn cưỡng chế theo job cần bật xác thực OIDC và phân quyền OpenFGA của Lakekeeper.
+
+### Quét số thẻ (R13)
+
+Số thẻ được token hóa trước khi ghi vào Bronze, nên theo thiết kế không có số thẻ đầy đủ nào trong Lakehouse. R13 kiểm tra lại điều đó trên chính các bucket: `make pan-scan` (task `pan_scan` của `dag_maintenance`) đọc mọi object của `bronze`, `silver`, `gold`, `ops`, gồm cả file của snapshot cũ, manifest và metadata, tìm mọi dãy 13–19 chữ số và so HMAC của từng dãy với các `card_token`. Tìm thấy thì R13 BLOCK, DAG gửi cảnh báo và job Gold dừng cho tới khi một lần quét sau PASS. Chi tiết ở [docs/week8.md](docs/week8.md).
 
 ### Dữ liệu cá nhân trong Bronze
 

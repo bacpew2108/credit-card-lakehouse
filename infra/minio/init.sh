@@ -7,6 +7,7 @@
 #   trino              đọc bronze, silver, gold; đọc/ghi ops
 #   landing-writer     đọc/ghi landing        seed_source.py tải file tham chiếu lên
 #   landing-reader     đọc landing            job load_files.py trong Airflow
+#   pan-scanner        đọc bronze, silver, gold, ops   job pan_scan.py (R13) quét mọi object trong bucket
 set -eu
 
 mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
@@ -49,6 +50,7 @@ for layer in bronze silver gold ops; do
   policy "rw-$layer" "$WRITE" "$layer"
 done
 policy read-layers "$READ" bronze silver gold
+policy read-lakehouse "$READ" bronze silver gold ops
 policy rw-landing "$WRITE" landing
 policy read-landing "$READ" landing
 
@@ -60,4 +62,5 @@ account trino "$MINIO_SECRET_TRINO" read-layers
 mc admin policy attach local rw-ops --user trino >/dev/null 2>&1 || true
 account landing-writer "$MINIO_SECRET_LANDING_WRITER" rw-landing
 account landing-reader "$MINIO_SECRET_LANDING_READER" read-landing
+account pan-scanner "$MINIO_SECRET_PAN_SCANNER" read-lakehouse
 echo "MinIO sẵn sàng: bucket landing, bronze, silver, gold, ops"
