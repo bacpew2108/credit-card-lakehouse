@@ -163,19 +163,21 @@ NK là bộ ba (channel, error_combo, is_refund). `error_combo` là các lỗi �
 |---|---|---|
 | transaction_id | bigint | PK |
 | date_key | int | FK dim_date |
-| customer_key | int | FK dim_customer; −1 nếu client_id không tồn tại |
-| card_key | int | FK dim_card |
+| customer_key | int | FK dim_customer; −1 nếu client_id không tồn tại; −2 nếu khách hàng đã bị xóa theo yêu cầu |
+| card_key | int | FK dim_card; −2 nếu khách hàng sở hữu thẻ đã bị xóa |
 | merchant_key | int | FK dim_merchant (chuỗi cửa hàng) |
 | location_key | int | FK dim_location (nơi giao dịch diễn ra) |
 | mcc_key | int | FK dim_mcc; −1 nếu mcc không tồn tại |
 | txn_profile_key | int | FK dim_txn_profile |
 | transaction_ts | timestamp | Phục vụ hidden partitioning và Q3 |
 | txn_hour | smallint | |
-| customer_age_at_txn | smallint | Năm giao dịch − birth_year |
+| customer_age_at_txn | smallint | Năm giao dịch − birth_year; NULL khi khách hàng đã bị xóa |
 | amount | decimal(12,2) | |
 | batch_id | string | Truy vết batch, phục vụ đối soát R11 |
 
 Khóa không khớp nhận −1. Trên dữ liệu thật không có khóa −1 nào (R04, R06 bằng 0). Gold chỉ dựng tháng M khi không có rule nào từ nguồn đến Silver đang BLOCK trong `ops.pipeline.dq_results`.
+
+Giao dịch của khách hàng đã bị xóa theo yêu cầu (`make erase`, mục 5) có `customer_id`, `card_id` = −2 ở Silver (`client_id`, `card_id` = `'-2'` ở Bronze và `quarantine_transactions`). Fact gán khóa −2 Deleted cho giao dịch có khóa tự nhiên −2, không gán −1, và R04 không coi −2 là lỗi tham chiếu. Nhờ vậy số dòng và tổng tiền ở mọi tầng không đổi sau khi xóa.
 
 ### Nhóm phân khúc
 
@@ -202,7 +204,9 @@ Giá trị thiếu (dòng −1) có nhóm `Unknown`.
 
 `active_customers`, `active_cards`, `customer_count` chỉ đếm khóa thật (bỏ −1, −2). R11 đối soát mỗi tháng: số dòng và tổng amount của Silver = fact = `mart_monthly_kpi`.
 
-## 4. Ops (`ops.pipeline`) – vận hành, chất lượng, danh mục
+Giao dịch của khách hàng đã xóa nằm ở ô Deleted: `mart_card_monthly` có dòng `card_key` = −2 (`card_brand`, `card_type` = `'Deleted'`, `utilization` NULL), `mart_customer_segment_monthly` có ô `age_band` = `'Unknown'`, `income_band`, `credit_score_band` = `'Deleted'` với `customer_count` = 0. Q7 bỏ các ô này, Q8 giữ nhóm Deleted trong tổng nhưng không đếm là thẻ có giao dịch.
+
+## 4. Ops (`ops.pipeline`, `ops.privacy`, `ops.demo`) – vận hành, chất lượng, danh mục
 
 | Bảng | Cột | Ghi bởi |
 |---|---|---|
@@ -212,6 +216,13 @@ Giá trị thiếu (dòng −1) có nhóm `Unknown`.
 | ops.pipeline.pipeline_runs | run_id, dag_id, batch_id, month_count, status (SUCCESS / BLOCKED / FAILED), failed_task, message, source_rows, bronze_rows, silver_rows, quarantine_rows, fact_rows, dq_pass, dq_warn, dq_block, dq_issues, started_at, finished_at, duration_seconds | Task `publish_run_report` (SUCCESS) và `on_failure_callback` (BLOCKED, FAILED) của các DAG, qua `run_report.py`. Chỉ ghi thêm |
 | ops.pipeline.table_stats | run_id, measured_at, table_name, row_count, data_bytes, data_files, snapshots | `storage_report.py --record` (task `table_stats` của `dag_maintenance`): mỗi bảng một dòng mỗi lần đo |
 | ops.pipeline.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
+
+Ngoài `ops.pipeline` còn hai namespace:
+
+| Bảng | Cột | Ghi bởi |
+|---|---|---|
+| ops.privacy.erasure_log | request_id, customer_id, card_ids (array), status (STARTED / DONE / FAILED), details (JSON: số dòng đã sửa ở từng bảng, kết quả kiểm tra), requested_at, finished_at | `erase_customer.py` (`make erase`). Chỉ vai trò engineer đọc được. `extract_jdbc.py` đọc bảng này ở mỗi lần trích xuất |
+| ops.demo.* | Bản sao để demo schema evolution, partition evolution, bảo trì (`mcc_codes`, `fact_partition`, `fact_small_files`) | `make demo` (kịch bản 3, 4, 6), xóa và tạo lại mỗi lần chạy |
 
 ### Quy ước của ops.pipeline.dq_results
 
@@ -235,3 +246,17 @@ Giá trị thiếu (dòng −1) có nhóm `Unknown`.
 - Dòng SUCCESS có số dòng của các tháng ở từng tầng lúc ghi (`source_rows` lấy từ `ingestion_log`, các cột còn lại đếm trên bảng) và số rule theo kết quả mới nhất của từng (tháng, rule): `dq_pass`, `dq_warn`, `dq_block`. `dq_issues` tóm tắt các rule không PASS kèm tổng số vi phạm, VD `R07 WARN 80; R14 WARN 1`. Dòng BLOCKED, FAILED để NULL các cột này.
 - `duration_seconds` = `finished_at` − `started_at`, tính từ lúc lần chạy bắt đầu đến lúc ghi dòng.
 - Một `run_id` có thể có nhiều dòng (thất bại rồi chạy lại thành công); dòng mới nhất có hiệu lực.
+
+## 5. Quyền xóa dữ liệu (`make erase CUSTOMER_ID=…`)
+
+| Tầng | Bảng | Thao tác |
+|---|---|---|
+| Bronze | customers_raw, cards_raw | Xóa dòng của khách hàng và các thẻ của khách |
+| Bronze, Ops | transactions_raw, quarantine_transactions | `client_id`, `card_id` → `'-2'` |
+| Silver | customers, cards | Xóa dòng |
+| Silver | transactions | `customer_id`, `card_id` → −2 |
+| Gold | dim_customer, dim_card | Xóa dòng |
+| Gold | fact_transaction | `customer_key`, `card_key` → −2, `customer_age_at_txn` → NULL |
+| Gold | 6 mart | Dựng lại các tháng có giao dịch của khách, rồi R11 |
+
+Sau đó `expire_snapshots` chỉ giữ snapshot hiện tại của mọi bảng đã sửa (file dữ liệu cũ bị xóa khỏi MinIO), và `remove_orphan_files` dọn file mồ côi cũ hơn 1 ngày. Khách hàng nằm trong `ops.privacy.erasure_log` từ lúc bắt đầu xóa. Các lần trích xuất sau sẽ bỏ customers, cards của khách ngay trong câu truy vấn nguồn, và ghi giao dịch với `client_id`, `card_id` = `'-2'`.

@@ -1,6 +1,7 @@
 -- Bảng dùng chung cho tính toán độc lập: đọc thẳng file gốc (data/raw), tự làm sạch theo định nghĩa
 -- trong docs/data_model.md, không dùng code hay dữ liệu của Bronze, Silver, Gold. run_queries.py thay
--- {data_dir}, {mcc_groups} và nạp sẵn bảng mcc(mcc_code, description) từ mcc_codes.json.
+-- {data_dir}, {mcc_groups}, nạp sẵn bảng mcc(mcc_code, description) từ mcc_codes.json và bảng
+-- erased(customer_id): khách hàng đã xóa theo yêu cầu (ops.privacy.erasure_log, make erase).
 
 -- Giao dịch. TRY_CAST: giá trị không parse được thành NULL, để R01, R02 đếm được.
 CREATE TABLE tx AS
@@ -50,6 +51,14 @@ SELECT
                        CAST(split_part(expires, '/', 1) AS INTEGER), 1)) AS expires_date
 FROM read_csv('{data_dir}/cards_data.csv', header = true, all_varchar = true);
 
+-- Khách hàng đã xóa: bỏ khách hàng và thẻ, giao dịch giữ lại với client_id, card_id = −2 (Deleted),
+-- như spark/maintenance/erase_customer.py
+UPDATE tx SET client_id = -2, card_id = -2
+WHERE client_id IN (SELECT customer_id FROM erased)
+   OR card_id IN (SELECT card_id FROM cards WHERE customer_id IN (SELECT customer_id FROM erased));
+DELETE FROM cards WHERE customer_id IN (SELECT customer_id FROM erased);
+DELETE FROM customers WHERE customer_id IN (SELECT customer_id FROM erased);
+
 CREATE TABLE mcc_groups AS
 SELECT CAST(mcc AS INTEGER) AS mcc_code, mcc_group
 FROM read_csv('{mcc_groups}', header = true, all_varchar = true);
@@ -76,6 +85,7 @@ WITH j AS (
         t.loc_online,
         CAST(t.ts AS DATE) AS day,
         t.client_id,
+        t.card_id,
         c.customer_id AS cust,
         k.card_id AS card,
         k.customer_id AS card_customer,
@@ -92,7 +102,9 @@ per_record AS (
     SELECT
         month,
         count(*) AS checked,
-        count_if(cust IS NULL OR card IS NULL) AS r04,
+        -- −2: giao dịch của khách hàng đã xóa, không phải lỗi tham chiếu
+        count_if((cust IS NULL AND client_id IS DISTINCT FROM -2)
+                 OR (card IS NULL AND card_id IS DISTINCT FROM -2)) AS r04,
         count_if(card IS NOT NULL AND card_customer IS DISTINCT FROM client_id) AS r05,
         count_if(mcc IS NULL) AS r06,
         count_if(channel NOT IN ('Swipe', 'Chip', 'Online') OR channel IS NULL

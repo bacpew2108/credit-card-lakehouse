@@ -33,6 +33,15 @@ RUNS_COLS = """
     source_rows BIGINT, bronze_rows BIGINT, silver_rows BIGINT, quarantine_rows BIGINT, fact_rows BIGINT,
     dq_pass INT, dq_warn INT, dq_block INT, dq_issues STRING,
     started_at TIMESTAMP, finished_at TIMESTAMP, duration_seconds DOUBLE"""
+# Danh sách khách hàng đã xóa theo yêu cầu (spark/maintenance/erase_customer.py). Namespace riêng
+# ops.privacy, chỉ vai trò engineer đọc được (infra/trino/rules.json). extract_jdbc đọc bảng này ở mỗi
+# lần trích xuất, nên nạp lại từ nguồn không đưa khách hàng đã xóa trở lại lakehouse.
+ERASURE_TABLE = "ops.privacy.erasure_log"
+ERASURE_COLS = """
+    request_id STRING, customer_id INT, card_ids ARRAY<INT>, status STRING, details STRING,
+    requested_at TIMESTAMP, finished_at TIMESTAMP"""
+# Khóa tự nhiên (customer_id, card_id) của giao dịch thuộc khách hàng đã xóa; fact dùng khóa −2 Deleted
+ERASED_ID = -2
 # Kích thước từng bảng sau mỗi lần bảo trì (spark/maintenance/storage_report.py --record)
 STATS_TABLE = "ops.pipeline.table_stats"
 STATS_COLS = """
@@ -55,6 +64,32 @@ def get_spark(app):
     for table, cols in ((LOG_TABLE, LOG_COLS), (DQ_TABLE, DQ_COLS)):
         ensure_ops_table(spark, table, cols)
     return spark
+
+
+def erased_customers(spark):
+    """(customer_id, card_id) của mọi khách hàng đã có yêu cầu xóa (kể cả yêu cầu đang chạy dở);
+    bảng chưa có thì là hai tập rỗng."""
+    if not spark.catalog.tableExists(ERASURE_TABLE):
+        return set(), set()
+    rows = spark.table(ERASURE_TABLE).select("customer_id", "card_ids").collect()
+    return {r.customer_id for r in rows}, {c for r in rows for c in (r.card_ids or [])}
+
+
+def anonymize(df, customer_col, card_col, customer_ids, card_ids, value):
+    """Giao dịch của khách hàng đã xóa: customer_col, card_col → value (−2 hoặc '-2' ở Bronze) khi
+    khách hàng hoặc thẻ nằm trong danh sách xóa. Số dòng giữ nguyên."""
+    if not customer_ids and not card_ids:
+        return df
+    cast = df.schema[customer_col].dataType.simpleString()
+    hit = (F.col(customer_col).isin([str(i) if cast == "string" else i for i in customer_ids])
+           | F.col(card_col).isin([str(i) if cast == "string" else i for i in card_ids]))
+    return (df.withColumn(customer_col, F.when(hit, F.lit(value)).otherwise(F.col(customer_col)))
+              .withColumn(card_col, F.when(hit, F.lit(value)).otherwise(F.col(card_col))))
+
+
+def not_in_sql(col, ids):
+    """Điều kiện SQL nguồn loại các id (số nguyên) đã xóa; danh sách rỗng → ''."""
+    return f"{col} NOT IN ({', '.join(str(int(i)) for i in sorted(ids))})" if ids else ""
 
 
 def all_tables(spark):
