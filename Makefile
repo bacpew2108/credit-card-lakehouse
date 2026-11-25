@@ -6,6 +6,7 @@ UV := uv run --no-project --with-requirements requirements-dev.txt
 PY := $(UV) python
 SEED := $(PY) generators/seed_source.py --data-dir "$(DATA_DIR)"
 SPARK := $(COMPOSE) exec -T airflow-scheduler python /opt/airflow/spark
+AIRFLOW := $(COMPOSE) exec -T airflow-scheduler airflow
 TRINO := $(COMPOSE) exec -T trino trino --output-format ALIGNED --execute
 BLOCK_RATIO_ARG = $(if $(BLOCK_RATIO),--block-ratio $(BLOCK_RATIO))
 # Docker Desktop Resource Saver: không còn container nào chạy quá 5 phút thì VM ngủ, lệnh đọc được trả
@@ -16,7 +17,7 @@ WAKE := docker system df >/dev/null
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status gold-ref gold gold-range gold-status storage-status demo erase test
+.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status gold-ref gold gold-range gold-status storage-status dag-on dag-off dag-trigger dag-runs rebuild runs-status maintenance pan-scan demo erase test
 
 help: ## Liệt kê các lệnh
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
@@ -31,7 +32,7 @@ secrets: ## In các khóa ngẫu nhiên để dán vào .env
 	@echo "SUPERSET_SECRET_KEY=$$(openssl rand -base64 42)"
 	@echo "HMAC_SECRET=$$(openssl rand -hex 32)"
 	@echo "LAKEKEEPER_ENCRYPTION_KEY=$$(openssl rand -hex 32)"
-	@for v in LAKEKEEPER_BRONZE LAKEKEEPER_SILVER LAKEKEEPER_GOLD LAKEKEEPER_OPS TRINO LANDING_WRITER LANDING_READER; do \
+	@for v in LAKEKEEPER_BRONZE LAKEKEEPER_SILVER LAKEKEEPER_GOLD LAKEKEEPER_OPS TRINO LANDING_WRITER LANDING_READER PAN_SCANNER; do \
 	  echo "MINIO_SECRET_$$v=$$(openssl rand -hex 20)"; done
 	@for v in MINIO_ROOT_PASSWORD META_DB_ADMIN_PASSWORD LAKEKEEPER_DB_PASSWORD AIRFLOW_DB_PASSWORD \
 	  SUPERSET_DB_PASSWORD SOURCE_DB_PASSWORD AIRFLOW_ADMIN_PASSWORD SUPERSET_ADMIN_PASSWORD; do \
@@ -206,6 +207,43 @@ storage-status: ## Dung lượng từng tầng: vật lý (mc du) và dữ liệ
 	  for b in bronze silver gold ops; do mc du l/$$b; done'
 	@echo "Dữ liệu đang dùng (file của snapshot hiện tại):"
 	@$(SPARK)/maintenance/storage_report.py
+
+dag-on: ## Bật một DAG để scheduler chạy: make dag-on DAG=dag_monthly (catchup 2019-01 → 2019-10)
+	@test -n "$(DAG)" || (echo "Thiếu DAG, VD: make dag-on DAG=dag_monthly"; exit 1)
+	$(AIRFLOW) dags unpause $(DAG)
+
+dag-off: ## Tạm dừng một DAG: make dag-off DAG=dag_monthly
+	@test -n "$(DAG)" || (echo "Thiếu DAG, VD: make dag-off DAG=dag_monthly"; exit 1)
+	$(AIRFLOW) dags pause $(DAG)
+
+dag-trigger: ## Bật DAG rồi tạo một lần chạy: make dag-trigger DAG=dag_reference [CONF='{"force": true}']
+	@test -n "$(DAG)" || (echo "Thiếu DAG, VD: make dag-trigger DAG=dag_reference"; exit 1)
+	@$(AIRFLOW) dags unpause $(DAG) >/dev/null
+	$(AIRFLOW) dags trigger $(DAG) $(if $(CONF),-c '$(CONF)')
+
+dag-runs: ## Trạng thái các lần chạy gần nhất của một DAG: make dag-runs DAG=dag_monthly
+	@test -n "$(DAG)" || (echo "Thiếu DAG, VD: make dag-runs DAG=dag_monthly"; exit 1)
+	$(AIRFLOW) dags list-runs $(DAG)
+
+rebuild: ## dag_rebuild cho một khoảng tháng: make rebuild FROM=2015-01 TO=2015-12 [CLEAN=1] [EXTRACT=1]
+	@test -n "$(FROM)" -a -n "$(TO)" || (echo "Thiếu FROM/TO, VD: make rebuild FROM=2015-01 TO=2015-12 CLEAN=1"; exit 1)
+	@$(MAKE) --no-print-directory dag-trigger DAG=dag_rebuild \
+	  CONF='{"start_month": "$(FROM)", "end_month": "$(TO)", "clean": $(if $(CLEAN),true,false), "extract": $(if $(EXTRACT),true,false)}'
+
+runs-status: ## 15 lần chạy DAG gần nhất trong ops.pipeline.pipeline_runs (kết quả, số dòng, DQ, thời gian)
+	$(TRINO) "SELECT date_format(finished_at, '%m-%d %H:%i') AS finished, dag_id, batch_id, status, failed_task, \
+	    source_rows, silver_rows, quarantine_rows AS quarantine, fact_rows, dq_warn, dq_block, dq_issues, \
+	    round(duration_seconds) AS seconds FROM ops.pipeline.pipeline_runs ORDER BY finished_at DESC LIMIT 15; \
+	  SELECT date_format(finished_at, '%m-%d %H:%i') AS finished, dag_id, batch_id, failed_task, message \
+	    FROM ops.pipeline.pipeline_runs WHERE status <> 'SUCCESS' ORDER BY finished_at DESC LIMIT 5"
+
+maintenance: ## Bảo trì mọi bảng Iceberg: make maintenance [TABLE=ops.pipeline.dq_results] [RETAIN_DAYS=7] [RETAIN_LAST=3] [ORPHAN_DAYS=3]
+	$(SPARK)/maintenance/iceberg_maintenance.py all $(if $(TABLE),--table $(TABLE)) \
+	  $(if $(RETAIN_DAYS),--retain-days $(RETAIN_DAYS)) $(if $(RETAIN_LAST),--retain-last $(RETAIN_LAST)) \
+	  $(if $(ORPHAN_DAYS),--orphan-days $(ORPHAN_DAYS))
+
+pan-scan: ## R13: quét số thẻ đầy đủ trong mọi object của bucket bronze, silver, gold, ops
+	$(SPARK)/quality/pan_scan.py
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1

@@ -43,6 +43,12 @@ x-airflow-common:
     AWS_ACCESS_KEY_ID: landing-reader
     AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_LANDING_READER}
     AWS_REGION: us-east-1
+    # Job pan_scan (R13) đọc mọi object của bucket bronze, silver, gold, ops bằng tài khoản chỉ đọc pan-scanner
+    PAN_SCAN_ACCESS_KEY: pan-scanner
+    PAN_SCAN_SECRET_KEY: ${MINIO_SECRET_PAN_SCANNER}
+    # Cảnh báo Telegram của on_failure_callback; để trống thì không gửi
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     SOURCE_JDBC_URL: jdbc:postgresql://postgres-source:5432/${SOURCE_DB_NAME}
     SOURCE_DB_USER: ${SOURCE_DB_USER}
     SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
@@ -106,6 +112,7 @@ services:
       MINIO_SECRET_TRINO: ${MINIO_SECRET_TRINO}
       MINIO_SECRET_LANDING_WRITER: ${MINIO_SECRET_LANDING_WRITER}
       MINIO_SECRET_LANDING_READER: ${MINIO_SECRET_LANDING_READER}
+      MINIO_SECRET_PAN_SCANNER: ${MINIO_SECRET_PAN_SCANNER}
     volumes:
       - ./infra/minio/init.sh:/init.sh:ro
     restart: "no"

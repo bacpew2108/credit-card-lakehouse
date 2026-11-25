@@ -209,11 +209,13 @@ Giá trị thiếu (dòng −1) có nhóm `Unknown`.
 | ops.pipeline.ingestion_log | run_id, source, batch_id, source_count, row_count, checksum, status (SUCCESS / FAILED), message, started_at, finished_at | Job Bronze (một dòng mỗi lần nạp; batch có lần nạp gần nhất SUCCESS thì bỏ qua) |
 | ops.pipeline.dq_results | run_id, batch_id, rule_id, severity (BLOCK / WARN / INFO), checked_count, failed_count, failed_ratio (double), status (PASS / WARN / BLOCK / INFO), details, created_at | `reconcile.py` (R10, R11), job Silver (R01–R03, I01), `rules.py` (R04–R09, R12, R14), R13. Chỉ ghi thêm: một dòng cho mỗi (lần chạy, batch, rule) |
 | ops.pipeline.quarantine_transactions | Các cột của bronze.card.transactions_raw + rule_id, reason, run_id, quarantined_at; partition `_batch_id`, ghi đè phần của tháng M mỗi lần chạy | Job Silver |
+| ops.pipeline.pipeline_runs | run_id, dag_id, batch_id, month_count, status (SUCCESS / BLOCKED / FAILED), failed_task, message, source_rows, bronze_rows, silver_rows, quarantine_rows, fact_rows, dq_pass, dq_warn, dq_block, dq_issues, started_at, finished_at, duration_seconds | Task `publish_run_report` (SUCCESS) và `on_failure_callback` (BLOCKED, FAILED) của các DAG, qua `run_report.py`. Chỉ ghi thêm |
+| ops.pipeline.table_stats | run_id, measured_at, table_name, row_count, data_bytes, data_files, snapshots | `storage_report.py --record` (task `table_stats` của `dag_maintenance`): mỗi bảng một dòng mỗi lần đo |
 | ops.pipeline.data_catalog | layer, table_name, column_name, pii_level, treatment, note | Nạp từ [data_catalog.csv](data_catalog.csv) |
 
 ### Quy ước của ops.pipeline.dq_results
 
-- `batch_id` là tháng (`2019-03`) với rule giao dịch, `ref_YYYYMMDD` với R09. `rule_id` theo mục 6 Design Doc; R10 tách thành **R10.1** (số dòng nguồn = bronze) và **R10.2** (bronze = silver + quarantine). **I01** là chỉ số thông tin: merchant có nhiều vị trí.
+- `batch_id` là tháng (`2019-03`) với rule giao dịch, `ref_YYYYMMDD` với R09, `scan_YYYYMMDD` với R13. `rule_id` theo mục 6 Design Doc; R10 tách thành **R10.1** (số dòng nguồn = bronze) và **R10.2** (bronze = silver + quarantine). **I01** là chỉ số thông tin: merchant có nhiều vị trí.
 - `severity` là mức của rule: BLOCK (R01–R03, R10, R11, R13), WARN (R04–R09, R12, R14), INFO (I01).
 - `status` là kết quả của batch:
   - PASS: không có vi phạm.
@@ -222,5 +224,14 @@ Giá trị thiếu (dòng −1) có nhóm `Unknown`.
   - INFO: chỉ ghi nhận, không chặn.
 - R12 xét theo tháng: `checked_count` = 1, `failed_count` = 1 khi số giao dịch hoặc tổng tiền lệch quá ±3σ so với 12 tháng liền trước; chưa đủ 12 tháng thì `checked_count` = 0. R12 chỉ cảnh báo, không nâng thành BLOCK.
 - R11 so 4 cặp mỗi tháng (số dòng, tổng amount của Silver với fact; của fact với `mart_monthly_kpi`): `checked_count` = 4, `failed_count` = số cặp lệch.
+- R13 xét theo object: `checked_count` là số object đã quét trong bốn bucket, `failed_count` là số object chứa số thẻ đầy đủ, có cột `card_number` hoặc `cvv`, hoặc không đọc được. `details` chỉ ghi số thẻ đã che (6 số đầu, 4 số cuối). Kết quả có hiệu lực của R13 là lần quét gần nhất, không theo batch: khi nó là BLOCK, job Gold không dựng fact cho tới khi một lần quét sau PASS.
 - `details` ghi số vi phạm theo từng điều kiện khi rule có nhiều điều kiện (VD R14: `trước tháng mở thẻ: 1; sau tháng hết hạn: 0`), lý do cách ly với R01–R03, số dòng hai vế với R10, số dòng và tổng tiền ba bảng với R11, z-score với R12.
 - Kết quả có hiệu lực của một rule trong một batch là dòng mới nhất (`max_by(status, created_at)`). Task `dq_silver` của `dag_monthly` và job Gold dừng khi kết quả có hiệu lực của một rule từ nguồn đến Silver trong tháng là BLOCK (`SILVER_RULES`: mọi rule trừ R11 và I01). Vì không xét R11, một lần R11 BLOCK cũ không chặn việc chạy lại `dag_monthly` để dựng lại Gold.
+
+### Quy ước của ops.pipeline.pipeline_runs
+
+- Một dòng cho mỗi kết quả của một lần chạy DAG. `batch_id` là tháng (`2019-03`) với `dag_monthly`, khoảng tháng (`2010-01..2018-12`) với `dag_rebuild`, NULL với DAG không xử lý theo tháng; `month_count` là số tháng.
+- `status`: SUCCESS do task cuối `publish_run_report` ghi. BLOCKED khi lần chạy dừng vì chính nó ghi một rule BLOCK vào `dq_results`; `message` liệt kê rule và `details`. FAILED cho mọi lỗi khác; `message` là thông báo lỗi của task. `failed_task` là task thất bại.
+- Dòng SUCCESS có số dòng của các tháng ở từng tầng lúc ghi (`source_rows` lấy từ `ingestion_log`, các cột còn lại đếm trên bảng) và số rule theo kết quả mới nhất của từng (tháng, rule): `dq_pass`, `dq_warn`, `dq_block`. `dq_issues` tóm tắt các rule không PASS kèm tổng số vi phạm, VD `R07 WARN 80; R14 WARN 1`. Dòng BLOCKED, FAILED để NULL các cột này.
+- `duration_seconds` = `finished_at` − `started_at`, tính từ lúc lần chạy bắt đầu đến lúc ghi dòng.
+- Một `run_id` có thể có nhiều dòng (thất bại rồi chạy lại thành công); dòng mới nhất có hiệu lực.

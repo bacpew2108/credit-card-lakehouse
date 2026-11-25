@@ -74,6 +74,8 @@ def test_dirty_fixture_batch_is_blocked(fx):
     ("R12", 1, 1, 0.01, "WARN"),                  # R12 chỉ cảnh báo, không nâng
     ("I01", 74_831, 16_182, 0.01, "INFO"),        # merchant nhiều vị trí: chỉ ghi nhận
     ("R12", 0, 0, 0.01, "PASS"),                  # chưa đủ lịch sử, không xét
+    ("R13", 5370, 0, 0.01, "PASS"),               # quét đủ object, không có số thẻ
+    ("R13", 5370, 1, 0.01, "BLOCK"),              # một object có số thẻ cũng chặn
 ])
 def test_decide(rule_id, checked, failed, ratio, status):
     got_ratio, got_status = dq.decide(rule_id, checked, failed, ratio)
@@ -94,6 +96,20 @@ def test_blocked_uses_latest_result_and_skips_gold_rules(spark, monkeypatch):
     assert dq.blocked_batches(spark, months) == {"2019-03": ["R11"], "2019-04": ["R10.2"]}
     assert dq.blocked_batches(spark, months, dq.SILVER_RULES) == {"2019-04": ["R10.2"]}
     assert dq.blocked_rules(spark, "2019-03", dq.SILVER_RULES) == []
+
+
+def test_latest_result_is_the_most_recent_scan_across_batches(spark, monkeypatch):
+    """R13 không theo tháng: lần quét gần nhất có hiệu lực, dù thuộc batch nào."""
+    rows = [("scan_20261105", "R13", "BLOCK", 5), ("scan_20261112", "R13", "PASS", 12),
+            ("2019-03", "R11", "BLOCK", 20)]
+    spark.createDataFrame([(b, r, s, datetime(2026, 11, d)) for b, r, s, d in rows],
+                          "batch_id string, rule_id string, status string, created_at timestamp") \
+         .createOrReplaceTempView("dq_results_latest_test")
+    monkeypatch.setattr(dq.lh, "DQ_TABLE", "dq_results_latest_test")
+    got = dq.latest_result(spark, "R13")
+    assert (got.batch_id, got.status) == ("scan_20261112", "PASS")
+    assert dq.latest_result(spark, "R09") is None
+    assert "R13" not in dq.SILVER_RULES
 
 
 def test_r12_three_sigma_against_previous_12_months():

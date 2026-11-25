@@ -14,8 +14,8 @@ reference: R09 trên silver.card.customers và silver.card.cards, batch là ref_
 Trạng thái (status) của một rule trong một batch:
 - PASS: không có vi phạm.
 - WARN: có vi phạm nhưng batch đi tiếp. Với R01–R03, bản ghi vi phạm đã bị cách ly.
-- BLOCK: dừng DAG. Rule đối soát (R10, R11) lệch, hoặc rule xét từng bản ghi có tỷ lệ vi phạm vượt
-  ngưỡng (--block-ratio, mặc định DQ_BLOCK_RATIO hoặc 1%).
+- BLOCK: dừng DAG. Rule đối soát (R10, R11) lệch, R13 tìm thấy số thẻ, hoặc rule xét từng bản ghi có
+  tỷ lệ vi phạm vượt ngưỡng (--block-ratio, mặc định DQ_BLOCK_RATIO hoặc 1%).
 - INFO: chỉ ghi nhận (I01, merchant nhiều vị trí), không bao giờ chặn.
 """
 
@@ -56,11 +56,12 @@ RULES = {
     "R10.2": Rule("BLOCK", False, "bronze = silver + quarantine"),
     "R11": Rule("BLOCK", False, "số dòng, tổng amount theo tháng: silver = fact = mart_monthly_kpi"),
     "R12": Rule("WARN", False, "số giao dịch và tổng tiền của tháng trong ±3σ so với 12 tháng trước"),
+    "R13": Rule("BLOCK", False, "không có số thẻ đầy đủ trong bucket bronze, silver, gold, ops"),
     "R14": Rule("WARN", True, "giao dịch nằm trong thời hạn thẻ"),
     "I01": Rule("INFO", False, "merchant có nhiều vị trí (city, state, zip)"),
 }
 # Rule từ nguồn đến Silver: dq_silver và Gold chỉ cho đi tiếp khi không rule nào trong số này BLOCK (mục 4.1)
-SILVER_RULES = tuple(r for r in RULES if r not in ("R11", "I01"))
+SILVER_RULES = tuple(r for r in RULES if r not in ("R11", "R13", "I01"))
 CHANNELS = ("Swipe", "Chip", "Online")
 DEFAULT_BLOCK_RATIO = 0.01
 
@@ -124,6 +125,13 @@ def blocked_batches(spark, batch_ids, rules=None):
 def blocked_rules(spark, batch_id, rules=None):
     """Các rule mà kết quả mới nhất của batch là BLOCK."""
     return blocked_batches(spark, [batch_id], rules).get(batch_id, [])
+
+
+def latest_result(spark, rule_id):
+    """Dòng kết quả mới nhất của một rule, xét mọi batch (None nếu rule chưa chạy lần nào).
+    Dùng cho R13: mỗi lần quét là một batch scan_…, lần quét gần nhất mới có hiệu lực."""
+    return (spark.table(lh.DQ_TABLE).where(F.col("rule_id") == rule_id)
+                 .orderBy(F.desc("created_at")).limit(1).first())
 
 
 # ---------------------------------------------------------------- rule xét từng bản ghi
