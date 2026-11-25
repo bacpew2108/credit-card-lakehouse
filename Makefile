@@ -17,7 +17,7 @@ WAKE := docker system df >/dev/null
 
 
 .DEFAULT_GOAL := help
-.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status gold-ref gold gold-range gold-status storage-status dag-on dag-off dag-trigger dag-runs rebuild runs-status maintenance pan-scan demo erase test
+.PHONY: help env secrets build up up-core down clean ps logs config profile smoke trino seed seed-status source-sql bronze-ref bronze bronze-range bronze-status silver-ref silver silver-range silver-merchants silver-status dq dq-range dq-ref dq-status gold-ref gold gold-range gold-status storage-status dag-on dag-off dag-trigger dag-runs rebuild runs-status maintenance pan-scan queries verify-queries roles dashboards demo erase test
 
 help: ## Liệt kê các lệnh
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-17s %s\n", $$1, $$2}'
@@ -244,6 +244,19 @@ maintenance: ## Bảo trì mọi bảng Iceberg: make maintenance [TABLE=ops.pip
 
 pan-scan: ## R13: quét số thẻ đầy đủ trong mọi object của bucket bronze, silver, gold, ops
 	$(SPARK)/quality/pan_scan.py
+
+queries: ## Chạy truy vấn Q1–Q10 trên Trino bằng vai trò analyst: make queries [Q="q03 q05b"]
+	$(PY) sql/run_queries.py run $(Q)
+
+verify-queries: ## Đối chiếu Q1–Q10 với tính toán độc lập bằng DuckDB trên file gốc: make verify-queries [Q=q07]
+	$(PY) sql/run_queries.py verify $(Q) --data-dir "$(DATA_DIR)"
+
+roles: ## Kiểm tra phân quyền Trino 2 vai trò (engineer, analyst) bằng các lệnh đọc/ghi thử
+	$(PY) sql/run_queries.py roles
+
+dashboards: ## Tạo/cập nhật dataset, chart, dashboard D1, D2 trong Superset rồi chạy thử truy vấn mọi chart
+	set -o pipefail; $(COMPOSE) exec -T superset python /app/lakehouse/dashboards.py 2>&1 | grep -E '^\[superset\]|Error|error'
+	set -o pipefail; $(COMPOSE) exec -T superset python /app/lakehouse/dashboards.py check 2>&1 | grep -E '^\[check\]|Error|error'
 
 demo: ## (Tuần 10) Chạy 8 kịch bản mục 11.1
 	@echo "Chưa hiện thực (tuần 10)"; exit 1
